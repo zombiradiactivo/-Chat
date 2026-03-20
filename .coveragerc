@@ -1,0 +1,22 @@
+"""
+Configuración de coverage para tests
+"""
+[run]
+source = src
+omit = 
+    */tests/*
+    */site-packages/*
+    */__pycache__/*
+
+[report]
+exclude_lines =
+    pragma: no cover
+    def __repr__
+    raise AssertionError
+    raise NotImplementedError
+    if __name__ == .__main__.:
+    if TYPE_CHECKING:
+    pass
+
+[html]
+directory = htmlcov
