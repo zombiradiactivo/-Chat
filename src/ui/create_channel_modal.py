@@ -139,9 +139,12 @@ class CreateChannelModal(ctk.CTkToplevel):
             if roles_text:
                 allowed_roles = [r.strip() for r in roles_text.split(',')]
         
+        # Convertir string a ChannelType enum
+        channel_type = next(ct for ct in ChannelType if ct.value == self.type_combo.get())
+        
         data = {
             'name': name,
-            'type': ChannelType(self.type_combo.get()),
+            'type': channel_type,
             'server_id': self.server_id,
             'topic': self.topic_entry.get().strip() or None,
             'position': int(self.position_entry.get() or 0),

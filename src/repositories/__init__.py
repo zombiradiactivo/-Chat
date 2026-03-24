@@ -1,7 +1,7 @@
 """
 Inicializador del paquete repositories
 """
-from typing import Dict, Any
+from typing import Dict, Any, Optional, overload, Literal, Union
 from src.repositories.base import Repository, CRUDRepository
 from src.repositories.user_repository import UserRepository
 from src.repositories.server_repository import ServerRepository
@@ -40,6 +40,35 @@ class RepositoryFactory:
         for repo in self._repositories.values():
             repo.initialize()
     
+    # --- SOBRECARGAS PARA VS CODE (Pylance) ---
+    @overload
+    def get_repository(self, name: Literal['users']) -> UserRepository: ...
+    
+    @overload
+    def get_repository(self, name: Literal['servers']) -> ServerRepository: ...
+    
+    @overload
+    def get_repository(self, name: Literal['channels']) -> ChannelRepository: ...
+    
+    @overload
+    def get_repository(self, name: Literal['messages']) -> MessageRepository: ...
+    
+    @overload
+    def get_repository(self, name: Literal['roles']) -> RoleRepository: ...
+    
+    @overload
+    def get_repository(self, name: Literal['server_members']) -> ServerMemberRepository: ...
+    
+    @overload
+    def get_repository(self, name: Literal['invites']) -> InviteRepository: ...
+    
+    @overload
+    def get_repository(self, name: Literal['file_transfers']) -> FileTransferRepository: ...
+
+    @overload
+    def get_repository(self, name: str) -> Optional[Any]: ...
+
+
     def get_repository(self, name: str) -> Any:
         """Obtiene un repositorio por nombre"""
         return self._repositories.get(name)

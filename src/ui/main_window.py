@@ -9,7 +9,7 @@ import time
 
 from models.user import User
 from models.server import Server
-from models.channel import Channel
+from models.channel import Channel, ChannelType
 from models.message import Message
 from services import AuthService, ServerService, MessageService, InviteService, PermissionService
 from ui.components import AvatarLabel, ChannelButton, ServerButton, MessageBubble, UserListItem, ScrollableFrame
@@ -290,44 +290,50 @@ class MainWindow(ctk.CTk):
             return
         
         self.channels = self.server_service.get_server_channels(self.current_server.id)
+        logger.info(f"Canales cargados para servidor {self.current_server.name}: {len(self.channels)}")
         self._update_channel_list()
     
     def _update_channel_list(self):
         """Actualiza la lista de canales"""
-        # Limpiar canales
+        # Limpiar canales (excepto el botón + Crear Canal)
         for widget in self.channels_frame.winfo_children():
-            if isinstance(widget, ChannelButton):
+            if widget != self.add_channel_btn:
                 widget.destroy()
         
-        # Crear botones por tipo
-        text_channels = [c for c in self.channels if c.type == "text"]
-        voice_channels = [c for c in self.channels if c.type == "voice"]
+        # Crear botones por tipo, comparando valores en lugar del enum directamente
+        text_channels = [c for c in self.channels if (c.type.value if hasattr(c.type, 'value') else c.type) == 'text']
+        voice_channels = [c for c in self.channels if (c.type.value if hasattr(c.type, 'value') else c.type) == 'voice']
+        # logger.info(f"Cargando canales: {len(text_channels)} de texto, {len(voice_channels)} de voz")
+
+        for c in self.channels:
+            type_str = c.type.value if hasattr(c.type, 'value') else c.type
+            # print(f"Canal: {c.name} (ID: {c.id}, Tipo: {c.type}, Valor: {type_str})")
         
         if text_channels:
             ctk.CTkLabel(self.channels_frame, text="CANALES DE TEXTO", 
-                        font=ctk.CTkFont(size=11), text_color="gray60").pack(pady=(10, 5), anchor="w")
+                        font=ctk.CTkFont(size=11), text_color="gray60").pack(pady=(10, 5), anchor="w", padx=5)
             for channel in text_channels:
                 btn = ChannelButton(
                     self.channels_frame,
                     channel_name=channel.name,
                     channel_id=channel.id,
-                    channel_type=channel.type,
+                    channel_type=channel.type.value if hasattr(channel.type, 'value') else channel.type,
                     command=lambda c=channel: self._select_channel(c)
                 )
-                btn.pack(pady=2, fill="x")
+                btn.pack(pady=2, fill="x", padx=3)
         
         if voice_channels:
             ctk.CTkLabel(self.channels_frame, text="CANALES DE VOZ", 
-                        font=ctk.CTkFont(size=11), text_color="gray60").pack(pady=(15, 5), anchor="w")
+                        font=ctk.CTkFont(size=11), text_color="gray60").pack(pady=(15, 5), anchor="w", padx=5)
             for channel in voice_channels:
                 btn = ChannelButton(
                     self.channels_frame,
                     channel_name=channel.name,
                     channel_id=channel.id,
-                    channel_type=channel.type,
+                    channel_type=channel.type.value if hasattr(channel.type, 'value') else channel.type,
                     command=lambda c=channel: self._select_channel(c)
                 )
-                btn.pack(pady=2, fill="x")
+                btn.pack(pady=2, fill="x", padx=3)
     
     def _select_channel(self, channel: Channel):
         """Selecciona un canal"""
@@ -447,7 +453,23 @@ class MainWindow(ctk.CTk):
     
     def _on_channel_created(self, **kwargs):
         """Canal creado exitosamente"""
-        self._load_server_channels()
+        if not self.current_server:
+            return
+        if not self.current_user:
+            return
+
+        # Extraer server_id de kwargs si existe para evitar duplicado
+        kwargs.pop('server_id', None)
+        
+        success, error, channel = self.server_service.create_channel(
+            server_id=self.current_server.id,
+            creator_id=self.current_user.id,
+            **kwargs
+        )
+        if success:
+            self._load_server_channels()
+        else:
+            print(f"Error creando canal: {error}")
     
     def _show_main_interface(self):
         """Muestra la interfaz principal"""

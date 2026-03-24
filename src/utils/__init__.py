@@ -14,6 +14,7 @@ import re
 from .encryption import EncryptionService, AESEncryption
 from .validation import validate_email, validate_username, validate_password, validate_server_name, validate_channel_name, validate_hex_color
 from .logger import setup_logger, get_log_file_path
+from .config_manager import ConfigManager
 
 __all__ = [
     'EncryptionService',
@@ -25,7 +26,8 @@ __all__ = [
     'validate_channel_name',
     'validate_hex_color',
     'setup_logger',
-    'get_log_file_path'
+    'get_log_file_path',
+    'ConfigManager'
 ]
 
 

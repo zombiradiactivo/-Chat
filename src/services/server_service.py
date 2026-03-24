@@ -11,7 +11,7 @@ from models.server import Server, ServerCreate, ServerUpdate
 from models.channel import Channel, ChannelCreate
 from models.role import Role, RoleCreate
 from models.server_member import ServerMember
-from models.enums import ConnectionType, SecurityLevel, Permission
+from models.enums import ChannelType, ConnectionType, SecurityLevel, Permission
 from utils.logger import setup_logger
 
 logger = setup_logger(__name__)
@@ -251,7 +251,7 @@ class ServerService:
             
             # No permitir modificar el rol @everyone
             if role.is_default:
-                return False, "No puedes modificar el rol @everyone"
+                return False, "No puedes modificar el rol @everyone", None
             
             success = self.roles_repo.update(role_id, kwargs)
             if success:
@@ -432,7 +432,7 @@ class ServerService:
         text_channel = ChannelCreate(
             server_id=server_id,
             name="general",
-            type="text",
+            type=ChannelType.TEXT,
             topic="Canal general de conversación"
         )
         self.channels_repo.create(text_channel.dict())
@@ -441,7 +441,7 @@ class ServerService:
         voice_channel = ChannelCreate(
             server_id=server_id,
             name="Voz General",
-            type="voice"
+            type=ChannelType.VOICE,
         )
         self.channels_repo.create(voice_channel.dict())
     

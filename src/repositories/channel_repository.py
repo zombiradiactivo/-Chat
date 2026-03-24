@@ -51,10 +51,16 @@ class ChannelRepository(CRUDRepository):
     
     def _row_to_channel(self, row: sqlite3.Row) -> Channel:
         """Convierte una fila a objeto Channel"""
+        # Convertir explícitamente a enum
+        if isinstance(row['type'], str):
+            channel_type = ChannelType(row['type'])
+        else:
+            channel_type = row['type']
+        
         return Channel(
             id=row['id'],
             name=row['name'],
-            type=ChannelType(row['type']),
+            type=channel_type,
             topic=row['topic'],
             server_id=row['server_id'],
             position=row['position'],

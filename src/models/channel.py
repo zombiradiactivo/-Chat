@@ -15,6 +15,9 @@ class ChannelBase(BaseModel):
     type: ChannelType
     topic: Optional[str] = None
 
+    class Config:
+        use_enum_values = False  # Mantener enums como enums, no convertir a strings
+
     @validator('name')
     def name_must_be_valid(cls, v):
         if len(v) < 1 or len(v) > 100:
