@@ -475,3 +475,4 @@ class MainWindow(ctk.CTk):
         """Muestra la interfaz principal"""
         self.deiconify()
         self._load_user_servers()
+

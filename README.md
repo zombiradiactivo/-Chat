@@ -115,7 +115,7 @@ src/
 
 1. **Clonar o descargar el proyecto**
 ```bash
-cd Chat
+cd Chat_GitHub
 ```
 
 2. **Instalar dependencias**
@@ -123,15 +123,77 @@ cd Chat
 pip install -r requirements.txt
 ```
 
-3. **Ejecutar la aplicación**
+## Modos de Ejecución
+
+La aplicación ahora soporta **tres modos** de ejecución independientes:
+
+### 1. Modo Completo (Cliente + Servidor integrado)
+Ejecuta la aplicación completa con interfaz gráfica y opción de iniciar servidor desde la ventana de login.
+
 ```bash
 python main.py
 ```
 
-O también:
+o simplemente:
 ```bash
-python src/app.py
+python main.py
 ```
+
+### 2. Modo Cliente Solo
+Ejecuta solo la interfaz gráfica. Se conecta a un servidor externo (debe estar corriendo por separado).
+
+```bash
+python main.py client
+```
+
+o también:
+```bash
+python client.py
+```
+
+### 3. Modo Servidor Solo
+Ejecuta solo el servidor sin interfaz gráfica. Corre en consola y acepta conexiones de clientes.
+
+```bash
+python main.py server --host 0.0.0.0 --port 5555
+```
+
+o también:
+```bash
+python server.py --host 0.0.0.0 --port 5555
+```
+
+**Opciones del servidor:**
+- `--host`: Dirección IP a escuchar (por defecto: 0.0.0.0 - todas las interfaces)
+- `--port`: Puerto de escucha (por defecto: 5555)
+
+**Ejemplos:**
+```bash
+# Servidor en localhost, puerto 5555
+python server.py --host 127.0.0.1 --port 5555
+
+# Servidor accesible desde red local, puerto 8080
+python server.py --host 0.0.0.0 --port 8080
+```
+
+## Flujo de Trabajo Recomendado
+
+1. **Inicia el servidor** (en una terminal):
+```bash
+python main.py server --host 127.0.0.1 --port 5555
+```
+
+2. **Inicia el cliente** (en otra terminal):
+```bash
+python main.py client
+```
+
+3. En la ventana de login del cliente:
+   - El host ya estará preconfigurado como `127.0.0.1`
+   - El puerto como `5555`
+   - Inicia sesión con tu usuario
+
+4. **¡Listo!** Ya puedes chatear, crear servidores, canales, etc.
 
 ## Uso
 

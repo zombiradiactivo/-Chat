@@ -10,6 +10,9 @@ from dataclasses import dataclass, asdict
 from abc import ABC, abstractmethod
 import queue
 
+from src.utils.config_manager import ConfigManager
+from src.utils.logger import setup_logger
+logger = setup_logger(__name__)
 
 @dataclass
 class NetworkMessage:
@@ -68,7 +71,6 @@ class NetworkService(ABC):
         pass
 
 
-
 class TCPServer(NetworkService):
     """Servidor TCP para modo cliente-servidor"""
     
@@ -83,14 +85,17 @@ class TCPServer(NetworkService):
         self.lock = threading.RLock()
         self.server_thread: Optional[threading.Thread] = None
     
-    def start(self):
+    def start(self,host: str = '0.0.0.0', port: int = 5555):
         """Inicia el servidor"""
+        logger.info("Inicializando TCPServer")
+
         if self.running:
+            logger.info("TCPServer ya está corriendo")
             return
         
         self.server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        self.server_socket.bind((self.host, self.port))
+        self.server_socket.bind((host, port))
         self.server_socket.listen(10)
         self.running = True
         
@@ -99,6 +104,7 @@ class TCPServer(NetworkService):
         
         # Thread para procesar mensajes
         threading.Thread(target=self._process_messages, daemon=True).start()
+        threading.Thread(target=self._accept_connections, daemon=True).start()
     
     def stop(self):
         """Detiene el servidor"""
@@ -233,22 +239,25 @@ class TCPClient(NetworkService):
         self.callbacks: Dict[str, List[Callable]] = {}
         self.receiver_thread: Optional[threading.Thread] = None
         self.server_address: Optional[tuple] = None
+        self.server_host, self.server_port = ConfigManager.get_server_config()
     
-    def connect(self, host: str, port: int = 5555) -> bool:
+    def connect(self, server_host: str, server_port: int = 5555) -> bool:
         """Se conecta a un servidor"""
+        logger.info("Inicializando TCPClient")
         try:
             self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            self.socket.connect((host, port))
+            self.socket.connect((server_host, server_port))
             self.connected = True
             self.running = True
-            self.server_address = (host, port)
-            
+            self.server_address = (server_host, server_port)
+            logger.info(f"Connected to server at {server_host}:{server_port}")
             self.receiver_thread = threading.Thread(target=self._receive_messages, daemon=True)
             self.receiver_thread.start()
             
             return True
         except Exception as e:
             print(f"Error connecting to server: {e}")
+            logger.info(f"Error connecting to server: {e}")
             return False
     
     def disconnect(self):
@@ -324,3 +333,10 @@ class TCPClient(NetworkService):
                     callback(data)
                 except Exception as e:
                     print(f"Error in callback: {e}")
+
+    def start(self):
+        raise NotImplementedError
+
+    def stop(self):
+        raise NotImplementedError
+

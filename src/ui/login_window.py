@@ -1,9 +1,17 @@
 """
 Ventana de login/registro
 """
+import subprocess
+import sys
+import threading
+import os
+import signal
+from pathlib import Path
+
 import customtkinter as ctk
 from typing import Callable, Optional
 from models.user import UserCreate
+from src.network.service import TCPClient
 from utils.config_manager import ConfigManager
 
 
@@ -19,6 +27,9 @@ class LoginWindow(ctk.CTkToplevel):
         
         self.on_login_success = on_login_success
         self.on_register_click = on_register_click
+        self.tcpclient = TCPClient()
+        self.server_process = None
+        self.server_running = False
         
         # Centrar ventana
         self.center_window()
@@ -108,6 +119,17 @@ class LoginWindow(ctk.CTkToplevel):
         )
         self.login_button.grid(row=6, column=0, pady=(0, 15), sticky="ew")
         
+        # Botón iniciar servidor
+        self.start_server_button = ctk.CTkButton(
+            form_frame,
+            text="Iniciar Servidor",
+            height=40,
+            command=self._on_start_server,
+            font=ctk.CTkFont(size=14, weight="bold")
+        )
+        self.start_server_button.grid(row=6, column=1, pady=(0, 15), sticky="ew")
+        
+
         # Separador
         separator = ctk.CTkLabel(
             form_frame,
@@ -209,7 +231,91 @@ class LoginWindow(ctk.CTkToplevel):
         ConfigManager.set_last_username(username, remember)
         
         # Llamar callback de login
+        self.tcpclient.connect(self.host_entry.get().strip(), int(self.port_entry.get().strip()))
         self.on_login_success(username, password)
+    
+    def _on_start_server(self):
+        """Maneja el evento de iniciar servidor"""
+        host = self.host_entry.get().strip()
+        port_str = self.port_entry.get().strip()
+        
+        if not host or not port_str:
+            self.show_error("Configura host y puerto primero")
+            return
+        
+        try:
+            port = int(port_str)
+        except ValueError:
+            self.show_error("Puerto inválido")
+            return
+        
+        if self.server_running:
+            self._stop_server()
+            return
+        
+        # Iniciar servidor como proceso separado
+        try:
+            # Obtener la ruta al script server.py
+            server_script = Path(__file__).parent.parent.parent / "server.py"
+            
+            if not server_script.exists():
+                self.show_error(f"No se encuentra server.py en {server_script}")
+                return
+            
+            # Construir comando
+            cmd = [sys.executable, str(server_script), '--host', host, '--port', str(port)]
+            
+            # Iniciar proceso
+            self.server_process = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                creationflags=subprocess.CREATE_NEW_PROCESS_GROUP if os.name == 'nt' else 0
+            )
+            
+            # Esperar un momento para ver si el servidor inicia correctamente
+            def check_server():
+                import time
+                time.sleep(2)
+                if self.server_process.poll() is not None:
+                    # El proceso terminó, hubo error
+                    stdout, stderr = self.server_process.communicate()
+                    error_msg = stderr.decode() if stderr else "El servidor no pudo iniciarse"
+                    self.show_error(f"Error: {error_msg}")
+                    self.server_process = None
+                    self.server_running = False
+                else:
+                    # Servidor iniciado correctamente
+                    self.server_running = True
+                    self.start_server_button.configure(text="Detener Servidor")
+            
+            threading.Thread(target=check_server, daemon=True).start()
+            
+        except Exception as e:
+            self.show_error(f"Error iniciando servidor: {str(e)}")
+    
+    def _stop_server(self):
+        """Detiene el servidor externo"""
+        if self.server_process:
+            try:
+                if os.name == 'nt':
+                    # Windows
+                    self.server_process.send_signal(signal.CTRL_BREAK_EVENT)
+                else:
+                    # Unix/Linux/Mac
+                    self.server_process.terminate()
+                
+                # Esperar a que termine
+                try:
+                    self.server_process.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    self.server_process.kill()
+                
+                self.server_process = None
+                self.server_running = False
+                self.start_server_button.configure(text="Iniciar Servidor")
+            except Exception as e:
+                self.show_error(f"Error deteniendo servidor: {str(e)}")
     
     def show_error(self, message: str):
         """Muestra un mensaje de error"""
