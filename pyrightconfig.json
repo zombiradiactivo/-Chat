@@ -3,5 +3,8 @@
   "exclude": ["**/node_modules", "**/__pycache__", "**/.*"],
   "reportMissingImports": true,
   "pythonVersion": "3.8",
-  "typeCheckingMode": "basic"
+  "typeCheckingMode": "basic",
+  "extraPaths": [
+    "./src"
+  ]
 }

@@ -9,10 +9,44 @@ from typing import Callable, Dict, Any, Optional, List
 from dataclasses import dataclass, asdict
 from abc import ABC, abstractmethod
 import queue
+from enum import Enum
+from datetime import datetime, date
 
-from src.utils.config_manager import ConfigManager
-from src.utils.logger import setup_logger
+from src_Client_Server.Server.utils.config_manager import ConfigManager
+from src_Client_Server.Server.utils.logger import setup_logger
 logger = setup_logger(__name__)
+
+class EnumEncoder(json.JSONEncoder):
+    """Encoder para manejar enums, datetime y otros tipos en JSON"""
+    def default(self, obj):
+        if isinstance(obj, Enum):
+            return obj.value
+        elif isinstance(obj, (datetime, date)):
+            return obj.isoformat()
+        return super().default(obj)
+
+def _serialize_for_json(obj):
+    """Convierte objetos a formato JSON-serializable - recursiva y robusta"""
+    if obj is None:
+        return None
+    elif isinstance(obj, bool):  # Verificar antes de int porque bool es subclass de int
+        return obj
+    elif isinstance(obj, (int, float, str)):
+        return obj
+    elif isinstance(obj, Enum):
+        return obj.value
+    elif isinstance(obj, (datetime, date)):
+        return obj.isoformat()
+    elif isinstance(obj, dict):
+        return {k: _serialize_for_json(v) for k, v in obj.items()}
+    elif isinstance(obj, (list, tuple)):
+        return [_serialize_for_json(item) for item in obj]
+    elif hasattr(obj, '__dict__'):
+        # Es un objeto personalizado, convertir su __dict__
+        return _serialize_for_json(obj.__dict__)
+    else:
+        # Como último recurso, convertir a string
+        return str(obj)
 
 @dataclass
 class NetworkMessage:
@@ -28,7 +62,9 @@ class NetworkMessage:
     
     def to_json(self) -> str:
         """Convierte el mensaje a JSON"""
-        return json.dumps(asdict(self))
+        msg_dict = asdict(self)
+        msg_dict['data'] = _serialize_for_json(msg_dict['data'])
+        return json.dumps(msg_dict, cls=EnumEncoder)
     
     @classmethod
     def from_json(cls, json_str: str) -> 'NetworkMessage':
@@ -167,10 +203,12 @@ class TCPServer(NetworkService):
             self._notify_callbacks('client_disconnected', {'client_id': client_id})
     
     def _process_messages(self):
-        """Procesa mensajes de la cola"""
+        """Procesa mensajes de la cola y los enruta a handlers específicos"""
         while self.running:
             try:
                 client_id, message = self.message_queue.get(timeout=0.1)
+                # Enrutar mensaje según su tipo
+                self._handle_message(client_id, message)
                 self._notify_callbacks('message', {
                     'sender_id': client_id,
                     'message': message
@@ -179,6 +217,555 @@ class TCPServer(NetworkService):
                 continue
             except Exception as e:
                 print(f"Error processing message: {e}")
+    
+    def _handle_message(self, client_id: str, message: NetworkMessage):
+        """Enruta los mensajes a handlers específicos según el tipo"""
+        try:
+            # Importar los servicios necesarios aquí para evitar dependencias circulares
+            from src_Client_Server.Server.repositories import RepositoryFactory
+            from src_Client_Server.Server.services.server_service import ServerService
+            from src_Client_Server.Server.services.auth_service import AuthService
+            
+            repo_factory = RepositoryFactory()
+            
+            # Enrutar según tipo de mensaje
+            if message.type == "get_server":
+                self._handle_get_server(client_id, message, repo_factory)
+            elif message.type == "update_server":
+                self._handle_update_server(client_id, message, repo_factory)
+            elif message.type == "get_user_servers":
+                self._handle_get_user_servers(client_id, message, repo_factory)
+            elif message.type == "get_server_channels":
+                self._handle_get_server_channels(client_id, message, repo_factory)
+            elif message.type == "create_channel":
+                self._handle_create_channel(client_id, message, repo_factory)
+            elif message.type == "delete_channel":
+                self._handle_delete_channel(client_id, message, repo_factory)
+            elif message.type == "login":
+                self._handle_login(client_id, message, repo_factory)
+            elif message.type == "register":
+                self._handle_register(client_id, message, repo_factory)
+            elif message.type == "get_server_roles":
+                self._handle_get_server_roles(client_id, message, repo_factory)
+            elif message.type == "create_role":
+                self._handle_create_role(client_id, message, repo_factory)
+            elif message.type == "update_role":
+                self._handle_update_role(client_id, message, repo_factory)
+            elif message.type == "delete_role":
+                self._handle_delete_role(client_id, message, repo_factory)
+            elif message.type == "reorder_roles":
+                self._handle_reorder_roles(client_id, message, repo_factory)
+            elif message.type == "check_permission":
+                self._handle_check_permission(client_id, message, repo_factory)
+        except Exception as e:
+            print(f"Error handling message type {message.type}: {e}")
+    
+    def _handle_get_server(self, client_id: str, message: NetworkMessage, repo_factory):
+        """Maneja solicitud de obtener servidor"""
+        try:
+            from src_Client_Server.Server.services.server_service import ServerService
+            server_service = ServerService(repo_factory)
+            
+            server_id = message.data.get("server_id")
+            server = server_service.get_server(server_id)
+            
+            if server:
+                server_data = _serialize_for_json(server.dict())
+                response = NetworkMessage(
+                    type="get_server_response",
+                    data={"success": True, "server": server_data},
+                    sender_id="server"
+                )
+            else:
+                response = NetworkMessage(
+                    type="get_server_response",
+                    data={"success": False, "error": "Servidor no encontrado"},
+                    sender_id="server"
+                )
+            self.send(client_id, response)
+        except Exception as e:
+            response = NetworkMessage(
+                type="get_server_response",
+                data={"success": False, "error": str(e)},
+                sender_id="server"
+            )
+            self.send(client_id, response)
+    
+    def _handle_update_server(self, client_id: str, message: NetworkMessage, repo_factory):
+        """Maneja solicitud de actualizar servidor"""
+        try:
+            from src_Client_Server.Server.services.server_service import ServerService
+            server_service = ServerService(repo_factory)
+            
+            server_id = message.data.get("server_id")
+            user_id = message.data.get("user_id")
+            
+            # Extraer el resto de los datos
+            update_data = {k: v for k, v in message.data.items() 
+                          if k not in ["server_id", "user_id"]}
+            
+            success, error, updated_server = server_service.update_server(
+                server_id, user_id, **update_data
+            )
+            
+            if success:
+                server_data = _serialize_for_json(updated_server.dict())
+                response = NetworkMessage(
+                    type="update_server_response",
+                    data={"success": True, "server": server_data},
+                    sender_id="server"
+                )
+            else:
+                response = NetworkMessage(
+                    type="update_server_response",
+                    data={"success": False, "error": error},
+                    sender_id="server"
+                )
+            self.send(client_id, response)
+        except Exception as e:
+            response = NetworkMessage(
+                type="update_server_response",
+                data={"success": False, "error": str(e)},
+                sender_id="server"
+            )
+            self.send(client_id, response)
+    
+    def _handle_get_user_servers(self, client_id: str, message: NetworkMessage, repo_factory):
+        """Maneja solicitud de obtener servidores del usuario"""
+        try:
+            from src_Client_Server.Server.services.server_service import ServerService
+            server_service = ServerService(repo_factory)
+            
+            user_id = message.data.get("user_id")
+            servers = server_service.get_user_servers(user_id)
+            
+            # Serializar servers correctamente
+            servers_data = [_serialize_for_json(s.dict()) if hasattr(s, 'dict') else _serialize_for_json(s) for s in servers]
+            
+            response = NetworkMessage(
+                type="get_user_servers_response",
+                data={"success": True, "servers": servers_data},
+                sender_id="server"
+            )
+            self.send(client_id, response)
+        except Exception as e:
+            print(f"[GET_USER_SERVERS ERROR] {str(e)}")
+            import traceback
+            traceback.print_exc()
+            response = NetworkMessage(
+                type="get_user_servers_response",
+                data={"success": False, "error": str(e)},
+                sender_id="server"
+            )
+            self.send(client_id, response)
+    
+    def _handle_get_server_channels(self, client_id: str, message: NetworkMessage, repo_factory):
+        """Maneja solicitud de obtener canales del servidor"""
+        try:
+            from src_Client_Server.Server.services.server_service import ServerService
+            server_service = ServerService(repo_factory)
+            
+            server_id = message.data.get("server_id")
+            channels = server_service.get_server_channels(server_id)
+            
+            channels_data = [_serialize_for_json(c.dict()) if hasattr(c, 'dict') else _serialize_for_json(c) for c in channels]
+            response = NetworkMessage(
+                type="get_server_channels_response",
+                data={"success": True, "channels": channels_data},
+                sender_id="server"
+            )
+            self.send(client_id, response)
+        except Exception as e:
+            response = NetworkMessage(
+                type="get_server_channels_response",
+                data={"success": False, "error": str(e)},
+                sender_id="server"
+            )
+            self.send(client_id, response)
+    
+    def _handle_create_channel(self, client_id: str, message: NetworkMessage, repo_factory):
+        """Maneja solicitud de crear canal"""
+        try:
+            from src_Client_Server.Server.services.server_service import ServerService
+            server_service = ServerService(repo_factory)
+            
+            server_id = message.data.get("server_id")
+            channel_name = message.data.get("channel_name")
+            user_id = message.data.get("user_id")
+            
+            success, error, channel = server_service.create_channel(
+                server_id, channel_name, user_id
+            )
+            
+            if success:
+                channel_data = _serialize_for_json(channel.dict())
+                response = NetworkMessage(
+                    type="create_channel_response",
+                    data={"success": True, "channel": channel_data},
+                    sender_id="server"
+                )
+            else:
+                response = NetworkMessage(
+                    type="create_channel_response",
+                    data={"success": False, "error": error},
+                    sender_id="server"
+                )
+            self.send(client_id, response)
+        except Exception as e:
+            response = NetworkMessage(
+                type="create_channel_response",
+                data={"success": False, "error": str(e)},
+                sender_id="server"
+            )
+            self.send(client_id, response)
+    
+    def _handle_delete_channel(self, client_id: str, message: NetworkMessage, repo_factory):
+        """Maneja solicitud de eliminar canal"""
+        try:
+            from src_Client_Server.Server.services.server_service import ServerService
+            server_service = ServerService(repo_factory)
+            
+            channel_id = message.data.get("channel_id")
+            user_id = message.data.get("user_id")
+            
+            success, error = server_service.delete_channel(channel_id, user_id)
+            
+            response = NetworkMessage(
+                type="delete_channel_response",
+                data={"success": success, "error": error or ""},
+                sender_id="server"
+            )
+            self.send(client_id, response)
+        except Exception as e:
+            response = NetworkMessage(
+                type="delete_channel_response",
+                data={"success": False, "error": str(e)},
+                sender_id="server"
+            )
+            self.send(client_id, response)
+    
+    def _handle_login(self, client_id: str, message: NetworkMessage, repo_factory):
+        """Maneja solicitud de login"""
+        try:
+            from src_Client_Server.Server.services.auth_service import AuthService
+            auth_service = AuthService(repo_factory)
+            
+            email = message.data.get("email")
+            password = message.data.get("password")
+            
+            print(f"[LOGIN] Attempting login with email: {email}")
+            
+            # El orden de retorno es (success, error, user)
+            success, error, user = auth_service.login(email, password)
+            
+            print(f"[LOGIN] Result - Success: {success}, Error: {error}, User type: {type(user)}")
+            
+            if success and user:
+                try:
+                    user_dict = user.dict() if hasattr(user, 'dict') else user.__dict__
+                    # Convertir enums a valores
+                    if 'status' in user_dict:
+                        user_dict['status'] = user_dict['status'].value if hasattr(user_dict['status'], 'value') else user_dict['status']
+                    print(f"[LOGIN] User converted to dict successfully")
+                except Exception as e:
+                    print(f"[LOGIN] Error converting user to dict: {e}")
+                    import traceback
+                    traceback.print_exc()
+                    user_dict = None
+            else:
+                user_dict = None
+            
+            if success and user_dict:
+                response = NetworkMessage(
+                    type="login_response",
+                    data={"success": True, "user": user_dict},
+                    sender_id="server"
+                )
+            else:
+                response = NetworkMessage(
+                    type="login_response",
+                    data={"success": False, "error": error or "Usuario no encontrado"},
+                    sender_id="server"
+                )
+            self.send(client_id, response)
+        except Exception as e:
+            print(f"[LOGIN ERROR] {str(e)}")
+            import traceback
+            traceback.print_exc()
+            response = NetworkMessage(
+                type="login_response",
+                data={"success": False, "error": str(e)},
+                sender_id="server"
+            )
+            self.send(client_id, response)
+    
+    def _handle_register(self, client_id: str, message: NetworkMessage, repo_factory):
+        """Maneja solicitud de registro"""
+        try:
+            from src_Client_Server.Server.services.auth_service import AuthService
+            auth_service = AuthService(repo_factory)
+            
+            email = message.data.get("email")
+            password = message.data.get("password")
+            username = message.data.get("username")
+            
+            print(f"[REGISTER] Attempting registration with username: {username}, email: {email}")
+            
+            # El orden de retorno es (success, error, user)
+            success, error, user = auth_service.register(username, email, password)
+            
+            print(f"[REGISTER] Result - Success: {success}, Error: {error}, User type: {type(user)}")
+            
+            if success and user:
+                try:
+                    user_dict = user.dict() if hasattr(user, 'dict') else user.__dict__
+                    # Convertir enums a valores
+                    if 'status' in user_dict:
+                        user_dict['status'] = user_dict['status'].value if hasattr(user_dict['status'], 'value') else user_dict['status']
+                    print(f"[REGISTER] User converted to dict successfully")
+                except Exception as e:
+                    print(f"[REGISTER] Error converting user to dict: {e}")
+                    user_dict = None
+            else:
+                user_dict = None
+            
+            if success and user_dict:
+                response = NetworkMessage(
+                    type="register_response",
+                    data={"success": True, "user": user_dict},
+                    sender_id="server"
+                )
+            else:
+                response = NetworkMessage(
+                    type="register_response",
+                    data={"success": False, "error": error or "Error en registro"},
+                    sender_id="server"
+                )
+            self.send(client_id, response)
+        except Exception as e:
+            print(f"[REGISTER ERROR] {str(e)}")
+            import traceback
+            traceback.print_exc()
+            response = NetworkMessage(
+                type="register_response",
+                data={"success": False, "error": str(e)},
+                sender_id="server"
+            )
+            self.send(client_id, response)
+    
+    def _handle_get_server_roles(self, client_id: str, message: NetworkMessage, repo_factory):
+        """Maneja solicitud de obtener roles del servidor"""
+        try:
+            server_id = message.data.get("server_id")
+            roles_repo = repo_factory.get_repository('roles')
+            roles = roles_repo.get_by_server(server_id)
+            roles.sort(key=lambda r: r.position)
+            
+            roles_data = [_serialize_for_json(r.dict()) if hasattr(r, 'dict') else _serialize_for_json(r) for r in roles]
+            response = NetworkMessage(
+                type="get_roles_response",
+                data={"success": True, "roles": roles_data},
+                sender_id="server"
+            )
+            self.send(client_id, response)
+        except Exception as e:
+            response = NetworkMessage(
+                type="get_roles_response",
+                data={"success": False, "error": str(e)},
+                sender_id="server"
+            )
+            self.send(client_id, response)
+    
+    def _handle_create_role(self, client_id: str, message: NetworkMessage, repo_factory):
+        """Maneja solicitud de crear rol"""
+        try:
+            server_id = message.data.get("server_id")
+            user_id = message.data.get("user_id")
+            
+            # Verificar permisos
+            server_service = __import__('src_Client_Server.Server.services.server_service', fromlist=['ServerService']).ServerService(repo_factory)
+            server = server_service.get_server(server_id)
+            if not server or server.owner_id != user_id:
+                response = NetworkMessage(
+                    type="create_role_response",
+                    data={"success": False, "error": "Sin permisos"},
+                    sender_id="server"
+                )
+                self.send(client_id, response)
+                return
+            
+            # Crear rol
+            roles_repo = repo_factory.get_repository('roles')
+            role_data = {
+                "server_id": server_id,
+                "name": message.data.get("name"),
+                "color": message.data.get("color", "#99AAB5"),
+                "permissions": message.data.get("permissions", []),
+                "mentionable": message.data.get("mentionable", False),
+                "hoisted": message.data.get("hoisted", False),
+                "position": len(roles_repo.get_by_server(server_id))
+            }
+            created_role = roles_repo.create(role_data)
+            
+            response = NetworkMessage(
+                type="create_role_response",
+                data={"success": True, "role": _serialize_for_json(created_role.dict()) if hasattr(created_role, 'dict') else _serialize_for_json(created_role)},
+                sender_id="server"
+            )
+            self.send(client_id, response)
+        except Exception as e:
+            response = NetworkMessage(
+                type="create_role_response",
+                data={"success": False, "error": str(e)},
+                sender_id="server"
+            )
+            self.send(client_id, response)
+    
+    def _handle_update_role(self, client_id: str, message: NetworkMessage, repo_factory):
+        """Maneja solicitud de actualizar rol"""
+        try:
+            role_id = message.data.get("id")
+            server_id = message.data.get("server_id")
+            user_id = message.data.get("user_id")
+            
+            # Verificar permisos
+            server_service = __import__('src_Client_Server.Server.services.server_service', fromlist=['ServerService']).ServerService(repo_factory)
+            server = server_service.get_server(server_id)
+            if not server or server.owner_id != user_id:
+                response = NetworkMessage(
+                    type="update_role_response",
+                    data={"success": False, "error": "Sin permisos"},
+                    sender_id="server"
+                )
+                self.send(client_id, response)
+                return
+            
+            # Actualizar rol
+            roles_repo = repo_factory.get_repository('roles')
+            update_data = {k: v for k, v in message.data.items() 
+                          if k not in ["id", "server_id", "user_id"]}
+            updated_role = roles_repo.update(role_id, update_data)
+            
+            response = NetworkMessage(
+                type="update_role_response",
+                data={"success": True, "role": _serialize_for_json(updated_role.dict()) if hasattr(updated_role, 'dict') else _serialize_for_json(updated_role)},
+                sender_id="server"
+            )
+            self.send(client_id, response)
+        except Exception as e:
+            response = NetworkMessage(
+                type="update_role_response",
+                data={"success": False, "error": str(e)},
+                sender_id="server"
+            )
+            self.send(client_id, response)
+    
+    def _handle_delete_role(self, client_id: str, message: NetworkMessage, repo_factory):
+        """Maneja solicitud de eliminar rol"""
+        try:
+            role_id = message.data.get("role_id")
+            server_id = message.data.get("server_id")
+            user_id = message.data.get("user_id")
+            
+            # Verificar permisos
+            server_service = __import__('src_Client_Server.Server.services.server_service', fromlist=['ServerService']).ServerService(repo_factory)
+            server = server_service.get_server(server_id)
+            if not server or server.owner_id != user_id:
+                response = NetworkMessage(
+                    type="delete_role_response",
+                    data={"success": False, "error": "Sin permisos"},
+                    sender_id="server"
+                )
+                self.send(client_id, response)
+                return
+            
+            # Eliminar rol
+            roles_repo = repo_factory.get_repository('roles')
+            success = roles_repo.delete(role_id)
+            
+            response = NetworkMessage(
+                type="delete_role_response",
+                data={"success": success, "error": "" if success else "Error al eliminar"},
+                sender_id="server"
+            )
+            self.send(client_id, response)
+        except Exception as e:
+            response = NetworkMessage(
+                type="delete_role_response",
+                data={"success": False, "error": str(e)},
+                sender_id="server"
+            )
+            self.send(client_id, response)
+    
+    def _handle_reorder_roles(self, client_id: str, message: NetworkMessage, repo_factory):
+        """Maneja reordenación de roles"""
+        try:
+            server_id = message.data.get("server_id")
+            user_id = message.data.get("user_id")
+            positions = message.data.get("positions", {})
+            
+            # Verificar permisos
+            server_service = __import__('src_Client_Server.Server.services.server_service', fromlist=['ServerService']).ServerService(repo_factory)
+            server = server_service.get_server(server_id)
+            if not server or server.owner_id != user_id:
+                response = NetworkMessage(
+                    type="reorder_roles_response",
+                    data={"success": False, "error": "Sin permisos"},
+                    sender_id="server"
+                )
+                self.send(client_id, response)
+                return
+            
+            # Reordenar roles
+            roles_repo = repo_factory.get_repository('roles')
+            for role_id, position in positions.items():
+                roles_repo.update(role_id, {"position": position})
+            
+            response = NetworkMessage(
+                type="reorder_roles_response",
+                data={"success": True},
+                sender_id="server"
+            )
+            self.send(client_id, response)
+        except Exception as e:
+            response = NetworkMessage(
+                type="reorder_roles_response",
+                data={"success": False, "error": str(e)},
+                sender_id="server"
+            )
+            self.send(client_id, response)
+    
+    def _handle_check_permission(self, client_id: str, message: NetworkMessage, repo_factory):
+        """Verifica si el usuario tiene un permiso específico"""
+        try:
+            user_id = message.data.get("user_id")
+            server_id = message.data.get("server_id")
+            permission = message.data.get("permission")
+            
+            # Verificar permisos
+            permission_service = __import__('src_Client_Server.Server.services.permission_service', fromlist=['PermissionService']).PermissionService(repo_factory)
+            server_service = __import__('src_Client_Server.Server.services.server_service', fromlist=['ServerService']).ServerService(repo_factory)
+            
+            # Dueño siempre tiene permisos
+            server = server_service.get_server(server_id)
+            is_owner = server and server.owner_id == user_id
+            
+            # Verificar permiso
+            has_perm = is_owner or permission_service.has_permission(user_id, server_id, permission)
+            
+            response = NetworkMessage(
+                type="check_permission_response",
+                data={"success": has_perm},
+                sender_id="server"
+            )
+            self.send(client_id, response)
+        except Exception as e:
+            response = NetworkMessage(
+                type="check_permission_response",
+                data={"success": False, "error": str(e)},
+                sender_id="server"
+            )
+            self.send(client_id, response)
     
     def send(self, target_id: str, message: NetworkMessage) -> bool:
         """Envía un mensaje a un cliente específico"""

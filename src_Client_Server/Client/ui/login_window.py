@@ -14,7 +14,7 @@ from models.user import UserCreate
 from src_Client_Server.Client.network.service import TCPClient
 from src_Client_Server.Client.utils.config_manager import ConfigManager
 
-from src_Client_Server.Client.ui.main_window import MainWindow
+# from src_Client_Server.Client.ui.main_window import MainWindow
 
 
 class LoginWindow(ctk.CTkToplevel):
@@ -33,7 +33,7 @@ class LoginWindow(ctk.CTkToplevel):
         self.server_process = None
         self.server_running = False
         
-        self.mainwindow = MainWindow()
+        # self.mainwindow = MainWindow()
         self.configmanager = ConfigManager()
 
         # Centrar ventana
@@ -151,7 +151,7 @@ class LoginWindow(ctk.CTkToplevel):
             text_color="red",
             font=ctk.CTkFont(size=12)
         )
-        self.error_label.grid(row=9, column=0, pady=(10, 0))
+        self.error_label.grid(row=9, column=0, pady=(0, 0))
         
         # Cargar configuración guardada
         self._load_saved_config()
@@ -226,7 +226,7 @@ class LoginWindow(ctk.CTkToplevel):
         
         # Llamar callback de login
         # self.tcpclient.connect(self.host_entry.get().strip(), int(self.port_entry.get().strip()))
-        self.mainwindow.set_host_ip(host, port)
+        # self.mainwindow.set_host_ip(host, port)
 
         self.on_login_success(username, password)
 

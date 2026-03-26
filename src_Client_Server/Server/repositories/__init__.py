@@ -2,15 +2,15 @@
 Inicializador del paquete repositories
 """
 from typing import Dict, Any, Optional, overload, Literal, Union
-from src.repositories.base import Repository, CRUDRepository
-from src.repositories.user_repository import UserRepository
-from src.repositories.server_repository import ServerRepository
-from src.repositories.channel_repository import ChannelRepository
-from src.repositories.message_repository import MessageRepository
-from src.repositories.role_repository import RoleRepository
-from src.repositories.server_member_repository import ServerMemberRepository
-from src.repositories.invite_repository import InviteRepository
-from src.repositories.file_transfer_repository import FileTransferRepository
+from src_Client_Server.Server.repositories.base import Repository, CRUDRepository
+from src_Client_Server.Server.repositories.user_repository import UserRepository
+from src_Client_Server.Server.repositories.server_repository import ServerRepository
+from src_Client_Server.Server.repositories.channel_repository import ChannelRepository
+from src_Client_Server.Server.repositories.message_repository import MessageRepository
+from src_Client_Server.Server.repositories.role_repository import RoleRepository
+from src_Client_Server.Server.repositories.server_member_repository import ServerMemberRepository
+from src_Client_Server.Server.repositories.invite_repository import InviteRepository
+from src_Client_Server.Server.repositories.file_transfer_repository import FileTransferRepository
 
 
 class RepositoryFactory:

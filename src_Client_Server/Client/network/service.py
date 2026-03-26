@@ -10,8 +10,8 @@ from dataclasses import dataclass, asdict
 from abc import ABC, abstractmethod
 import queue
 
-from src.utils.config_manager import ConfigManager
-from src.utils.logger import setup_logger
+from src_Client_Server.Client.utils.config_manager import ConfigManager
+from src_Client_Server.Client.utils.logger import setup_logger
 logger = setup_logger(__name__)
 
 @dataclass

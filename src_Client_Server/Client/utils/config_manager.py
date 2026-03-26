@@ -59,10 +59,13 @@ class ConfigManager:
             return False
     
     @classmethod
-    def get_server_config(cls) -> Dict[str, int]:
-        """Obtiene la configuración del servidor"""
+    def get_server_config(cls) -> tuple:
+        """Obtiene la configuración del servidor como tupla (host, port)"""
         config = cls.load_config()
-        return config.get('server', cls.DEFAULT_CONFIG['server'])
+        server_config = config.get('server', cls.DEFAULT_CONFIG['server'])
+        host = server_config.get('host', '127.0.0.1')
+        port = int(server_config.get('port', 5555))
+        return host, port
     
     @classmethod
     def set_server_config(cls, host: str, port: int) -> bool:

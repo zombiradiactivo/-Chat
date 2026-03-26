@@ -8,6 +8,8 @@ import signal
 import argparse
 from pathlib import Path
 
+from src.repositories import RepositoryFactory
+
 # Asegurar que el directorio src esté en el path
 src_path = Path(__file__).parent / "src"
 if str(src_path) not in sys.path:
@@ -15,8 +17,6 @@ if str(src_path) not in sys.path:
 
 from src.network.service import TCPServer
 from src.utils.logger import setup_logger
-from src.repositories import RepositoryFactory
-
 
 logger = setup_logger(__name__)
 
@@ -29,8 +29,6 @@ class ChatServer:
         self.port = port
         self.server = TCPServer(host, port)
         self.running = False
-        self.repo_factory = None
-
         
         # Configurar manejo de señales
         signal.signal(signal.SIGINT, self._signal_handler)
@@ -39,44 +37,19 @@ class ChatServer:
     def _signal_handler(self, signum, frame):
         """Maneja señales de terminación"""
         logger.info("Recibida señal de terminación, deteniendo servidor...")
-        self.cleanup()
         self.stop()
         sys.exit(0)
     
-    def initialize(self):
-        """Inicializa la aplicación"""
-        try:
-            logger.info("Iniciando Chat App...")
-            
-            # Crear directorios necesarios
-            self._create_directories()
-            
-            # Inicializar base de datos
-            self.repo_factory = RepositoryFactory()
-            self.repo_factory.initialize_database()
-            
-            logger.info("Aplicación inicializada correctamente")
-            return True
-            
-        except Exception as e:
-            logger.error(f"Error inicializando aplicación: {e}")
-            return False
-
-    def _create_directories(self):
-        """Crea los directorios necesarios"""
-        from src_Client_Server.Server.utils import get_app_data_dir, get_uploads_dir, get_avatars_dir, get_banners_dir
-        
-        get_app_data_dir()
-        get_uploads_dir()
-        get_avatars_dir()
-        get_banners_dir()
-
     def start(self):
         """Inicia el servidor"""
         logger.info(f"Iniciando servidor en {self.host}:{self.port}")
         self.running = True
         
         try:
+            if not self.initialize():
+                print("Error inicializando la aplicación")
+                return 1
+            
             self.server.start(self.host, self.port)
             logger.info(f"Servidor escuchando en {self.host}:{self.port}")
             
@@ -97,10 +70,41 @@ class ChatServer:
     def stop(self):
         """Detiene el servidor"""
         self.running = False
-        self.cleanup()
         self.server.stop()
+        self.cleanup()
         logger.info("Servidor detenido")
+    
 
+    def initialize(self):
+        """Inicializa la aplicación"""
+        try:
+            logger.info("Iniciando Chat App...")
+            
+            # Crear directorios necesarios
+            self._create_directories()
+            
+            # Inicializar base de datos
+            self.repo_factory = RepositoryFactory()
+            self.repo_factory.initialize_database()
+            
+            logger.info("Aplicación inicializada correctamente")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error inicializando aplicación: {e}")
+            return False
+        finally:
+            self.cleanup()
+    
+    def _create_directories(self):
+        """Crea los directorios necesarios"""
+        from src.utils import get_app_data_dir, get_uploads_dir, get_avatars_dir, get_banners_dir
+        
+        get_app_data_dir()
+        get_uploads_dir()
+        get_avatars_dir()
+        get_banners_dir()
+    
     def cleanup(self):
         """Limpia recursos"""
         try:
@@ -109,6 +113,13 @@ class ChatServer:
                 logger.info("Conexiones de base de datos cerradas")
         except Exception as e:
             logger.error(f"Error en cleanup: {e}")
+
+    def _on_closing(self):
+        """Maneja el cierre de la ventana"""
+        logger.info("Cerrando servidor...")
+        self.cleanup()
+
+    
 
 
 def main():

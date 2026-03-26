@@ -38,8 +38,13 @@ class MainWindow(ctk.CTk):
         
         # Servicios de red del cliente (para comunicarse con el servidor)
         self.network_service = TCPClient()
+        self.network_service.register_callback('message', self._on_message_received)
         self.is_connected = False
         self.current_user_data = None  # Datos del usuario obtenidos del servidor
+        
+        # Response handling
+        self.response_event = threading.Event()
+        self.response_data = None
 
         # Ip Port predeterminados
         self.host = "127.0.0.1"
@@ -255,47 +260,85 @@ class MainWindow(ctk.CTk):
         self.login_window.deiconify()
         self.login_window.grab_set()
     
+    def _on_message_received(self, data):
+        """Maneja los mensajes recibidos del servidor"""
+        message = data.get('message')
+        if not message:
+            return
+        # Procesar respuestas específicas
+        if message.type in ["login_response", "register_response", "get_user_servers_response"]:
+            self.response_data = message.data
+            self.response_event.set()
+    
     def _handle_login(self, username: str, password: str):
         """Maneja el login"""
         # Conectar al servidor si no está conectado
         if not self.is_connected:
             server_host, server_port = ConfigManager.get_server_config()
-            logger.info(f" {server_host}, {server_port}")
+            logger.info(f"Conectando a {server_host}:{server_port}")
             if not self.network_service.connect(server_host, server_port):
                 self.login_window.show_error("No se pudo conectar al servidor")
                 return
             self.is_connected = True
             # Iniciar procesamiento de mensajes en segundo plano
             threading.Thread(target=self.network_service.start_processing, daemon=True).start()
+            time.sleep(0.5)  # Pequeña pausa para conectarse
         
         # Enviar mensaje de login al servidor
         login_message = NetworkMessage(
             type="login",
-            data={"username": username, "password": password},
+            data={"email": username, "password": password},
             sender_id="client"
         )
         
-        if self.network_service.send(login_message):
-            # Esperar respuesta (en una implementación real, esto sería asíncrono)
-            # Por ahora, simulamos éxito
-            self.current_user = User(id="temp_id", username=username, email="", status=UserStatus.ONLINE)
-            self.login_window.destroy()
-            self._load_user_servers()
-            self._show_main_interface()
-        else:
+        print(f"[CLIENT] Enviando login: email={username}, password={'*' * len(password)}")
+        
+        if not self.network_service.send(login_message):
             self.login_window.show_error("Error enviando solicitud de login")
+            return
+        
+        # Esperar respuesta del servidor
+        if not self.response_event.wait(timeout=5.0):
+            self.login_window.show_error("Timeout esperando respuesta del servidor")
+            return
+        
+        print(f"[CLIENT] Respuesta recibida: {self.response_data}")
+        
+        if not self.response_data or not self.response_data.get("success"):
+            error = self.response_data.get("error", "Error desconocido") if self.response_data else "Error desconocido"
+            self.login_window.show_error(f"Error de login: {error}")
+            self.response_event.clear()
+            return
+        
+        # Obtener usuario del servidor
+        user_data = self.response_data.get("user")
+        if not user_data:
+            self.login_window.show_error("Usuario no encontrado")
+            self.response_event.clear()
+            return
+        
+        print(f"[CLIENT] Usuario autenticado: {user_data}")
+        
+        # Crear objeto User con los datos del servidor
+        self.current_user = User(**user_data)
+        self.response_event.clear()
+        
+        self.login_window.destroy()
+        self._load_user_servers()
+        self._show_main_interface()
     
     def _handle_register(self, username: str, email: str, password: str):
         """Maneja el registro"""
         # Conectar al servidor si no está conectado
         if not self.is_connected:
             server_host, server_port = ConfigManager.get_server_config()
-            if not self.network_service.connect(server_host, server_port = 5555):
+            if not self.network_service.connect(server_host, server_port):
                 self.register_window.show_error("No se pudo conectar al servidor")
                 return
             self.is_connected = True
             # Iniciar procesamiento de mensajes en segundo plano
             threading.Thread(target=self.network_service.start_processing, daemon=True).start()
+            time.sleep(0.5)
         
         # Enviar mensaje de registro al servidor
         register_message = NetworkMessage(
@@ -304,13 +347,24 @@ class MainWindow(ctk.CTk):
             sender_id="client"
         )
         
-        if self.network_service.send(register_message):
-            # Esperar respuesta (en una implementación real, esto sería asíncrono)
-            # Por ahora, simulamos éxito
-            self.register_window.show_success("Cuenta creada exitosamente!")
-            self.register_window.after(1500, self._back_to_login)
-        else:
+        if not self.network_service.send(register_message):
             self.register_window.show_error("Error enviando solicitud de registro")
+            return
+        
+        # Esperar respuesta
+        if not self.response_event.wait(timeout=5.0):
+            self.register_window.show_error("Timeout esperando respuesta")
+            return
+        
+        if not self.response_data or not self.response_data.get("success"):
+            error = self.response_data.get("error", "Error desconocido") if self.response_data else "Error"
+            self.register_window.show_error(f"Error de registro: {error}")
+            self.response_event.clear()
+            return
+        
+        self.register_window.show_success("Cuenta creada exitosamente!")
+        self.response_event.clear()
+        self.register_window.after(1500, self._back_to_login)
     
     def _load_user_servers(self):
         """Carga los servidores del usuario"""
@@ -324,13 +378,25 @@ class MainWindow(ctk.CTk):
             sender_id=self.current_user.id
         )
         
-        if self.network_service.send(get_servers_message):
-            # En una implementación real, esperaríamos la respuesta de forma asíncrona
-            # Por ahora, simulamos con datos vacíos
-            self.servers = []
-            self._update_server_list()
-        else:
-            print("Error al solicitar servidores del usuario")
+        if not self.network_service.send(get_servers_message):
+            logger.error("Error al solicitar servidores del usuario")
+            logger.info(get_servers_message)
+            return
+        
+        # Esperar respuesta
+        if not self.response_event.wait(timeout=10.0):
+            logger.error("Timeout esperando servidores")
+            return
+        
+        if not self.response_data or not self.response_data.get("success"):
+            logger.error("Error obteniendo servidores")
+            return
+        
+        servers_data = self.response_data.get("servers", [])
+        self.servers = servers_data
+        self.response_event.clear()
+        
+        self._update_server_list()
     
     def _update_server_list(self):
         """Actualiza la lista de servidores en la sidebar"""

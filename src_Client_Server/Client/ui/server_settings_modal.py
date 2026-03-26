@@ -3,10 +3,12 @@ Modal para configurar servidor
 """
 import customtkinter as ctk
 from typing import Callable, Optional
-from models.server import Server, ServerUpdate
-from models.enums import ConnectionType, SecurityLevel
-from services import ServerService
-from utils.logger import setup_logger
+from src_Client_Server.Client.models.server import Server, ServerUpdate
+from src_Client_Server.Client.models.enums import ConnectionType, SecurityLevel
+from src_Client_Server.Client.network.service import TCPClient, NetworkMessage
+from src_Client_Server.Client.utils.config_manager import ConfigManager
+from src_Client_Server.Client.utils.logger import setup_logger
+import threading
 
 logger = setup_logger(__name__)
 
@@ -21,8 +23,18 @@ class ServerSettingsModal(ctk.CTkToplevel):
         self.user_id = user_id
         self.on_save = on_save
         
-        self.server_service = ServerService()
+        # Cliente de red para comunicarse con el servidor
+        self.network_service = TCPClient()
         self.server: Optional[Server] = None
+        self.response_received = False
+        self.response_data = None
+        self.response_event = threading.Event()
+        
+        # Registrar callback para respuestas
+        self.network_service.register_callback('message', self._on_message_received)
+        
+        # Conectar al servidor
+        self._connect_to_server()
         
         # Cargar datos del servidor
         self._load_server()
@@ -41,20 +53,72 @@ class ServerSettingsModal(ctk.CTkToplevel):
         
         self._build_ui()
     
+    def _connect_to_server(self):
+        """Conecta al servidor"""
+        server_host, server_port = ConfigManager.get_server_config()
+        if not self.network_service.connect(server_host, server_port):
+            self._show_error("No se pudo conectar al servidor")
+            return False
+        # Iniciar procesamiento de mensajes en segundo plano
+        threading.Thread(target=self.network_service.start_processing, daemon=True).start()
+        return True
+    
+    def _on_message_received(self, data):
+        """Maneja los mensajes recibidos del servidor"""
+        message = data.get('message')
+        if not message:
+            return
+        # Procesar respuestas específicas
+        if message.type == "get_server_response":
+            self.response_data = message.data
+            self.response_received = True
+            self.response_event.set()
+        elif message.type == "update_server_response":
+            self.response_data = message.data
+            self.response_received = True
+            self.response_event.set()
+    
     def _load_server(self):
         """Carga los datos del servidor"""
-        self.server = self.server_service.get_server(self.server_id)
+        # Enviar solicitud al servidor
+        get_server_message = NetworkMessage(
+            type="get_server",
+            data={"server_id": self.server_id, "user_id": self.user_id},
+            sender_id=self.user_id
+        )
         
-        # Verificar que el usuario es dueño
-        if not self.server:
+        if not self.network_service.send(get_server_message):
+            self._show_error("Error enviando solicitud al servidor")
+            return False
+        
+        # Esperar respuesta
+        if not self.response_event.wait(timeout=5.0):
+            self._show_error("Timeout esperando respuesta del servidor")
+            return False
+        
+        if not self.response_received or not self.response_data:
+            self._show_error("No se recibió respuesta del servidor")
+            return False
+        
+        if not self.response_data.get("success"):
+            error_msg = self.response_data.get("error", "Error desconocido")
+            self._show_error(f"Error del servidor: {error_msg}")
+            return False
+        
+        server_dict = self.response_data.get("server")
+        if not server_dict:
             self._show_error("Servidor no encontrado")
             return False
         
+        self.server = Server(**server_dict)
         if self.server.owner_id != self.user_id:
             self._show_error("No tienes permiso para modificar este servidor")
             self.server = None
             return False
         
+        self.response_received = False
+        self.response_data = None
+        self.response_event.clear()
         return True
     
     def _build_ui(self):
@@ -218,7 +282,6 @@ class ServerSettingsModal(ctk.CTkToplevel):
             self._show_error("El nombre del servidor es obligatorio")
             return
         
-        # Validar max_members
         try:
             max_members = int(self.max_members.get() or 100)
             if max_members < 1 or max_members > 10000:
@@ -232,25 +295,47 @@ class ServerSettingsModal(ctk.CTkToplevel):
             'name': name,
             'description': self.description_entry.get().strip() or None,
             'icon': self.icon_entry.get().strip() or None,
-            'connection_type': ConnectionType(self.connection_type.get()),
-            'security_level': SecurityLevel(self.security_level.get()),
+            'connection_type': ConnectionType(self.connection_type.get()).value,
+            'security_level': SecurityLevel(self.security_level.get()).value,
             'max_members': max_members,
             'allow_file_transfer': self.file_transfer_var.get(),
             'allow_video_streaming': self.video_streaming_var.get(),
             'require_verification': self.verification_var.get()
         }
         
-        # Actualizar servidor
-        success, error, updated_server = self.server_service.update_server(
-            self.server_id, self.user_id, **update_data
+        # Enviar solicitud al servidor
+        update_server_message = NetworkMessage(
+            type="update_server",
+            data={'server_id': self.server_id, 'user_id': self.user_id, **update_data},
+            sender_id=self.user_id
         )
         
-        if success:
-            if self.on_save:
-                self.on_save(updated_server)
-            self.destroy()
-        else:
-            self._show_error(error or "Error al guardar cambios")
+        if not self.network_service.send(update_server_message):
+            self._show_error("Error enviando solicitud al servidor")
+            return
+        
+        if not self.response_event.wait(timeout=5.0):
+            self._show_error("Timeout esperando respuesta del servidor")
+            return
+        
+        if not self.response_received or not self.response_data:
+            self._show_error("No se recibió respuesta del servidor")
+            return
+        
+        if not self.response_data.get("success"):
+            error_msg = self.response_data.get("error", "Error desconocido")
+            self._show_error(f"Error del servidor: {error_msg}")
+            return
+        
+        updated_server_dict = self.response_data.get("server")
+        if not updated_server_dict:
+            self._show_error("Servidor no actualizado")
+            return
+        
+        updated_server = Server(**updated_server_dict)
+        if self.on_save:
+            self.on_save(updated_server)
+        self.destroy()
     
     def _show_error(self, message: str):
         """Muestra mensaje de error"""

@@ -57,8 +57,6 @@ class ChatClient:
     def stop(self):
         """Detiene el cliente"""
         self.running = False
-        if self.app:
-            self.app.cleanup()
         logger.info("Cliente detenido")
 
 

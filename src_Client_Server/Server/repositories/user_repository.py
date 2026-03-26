@@ -7,8 +7,8 @@ from datetime import datetime
 from typing import List, Optional, Dict, Any
 from hashlib import sha256
 
-from src.repositories.base import CRUDRepository
-from src.models.user import User, UserCreate, UserUpdate
+from src_Client_Server.Server.repositories.base import CRUDRepository
+from src_Client_Server.Server.models.user import User, UserCreate, UserUpdate
 
 
 class UserRepository(CRUDRepository):

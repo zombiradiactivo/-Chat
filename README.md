@@ -93,14 +93,22 @@ Aplicación de chat estilo Discord completa desarrollada en Python con interfaz 
 El proyecto sigue una **Arquitectura Limpia (Clean Architecture)** con separación clara de responsabilidades:
 
 ```
-src/
-├── models/          # Modelos de datos (Pydantic)
-├── repositories/    # Acceso a datos (SQLite)
-├── services/        # Lógica de negocio
-├── network/         # Comunicación en red
-├── ui/              # Interfaz gráfica
-├── utils/           # Utilidades
-└── controllers/     # Controladores (futuro)
+src_Client_Server
+│
+├───Client
+│   ├───data          # Almacenamiento de configuraciones
+│   ├───models        # Modelos de datos (Pydantic)
+│   ├───network       # Comunicación en red
+│   ├───ui            # Interfaz gráfica
+│   └───utils         # Utilidades
+│
+└───Server
+    ├───data          # Almacenamiento de Base de datos
+    ├───models        # Modelos de datos (Pydantic)
+    ├───network       # Comunicación en red
+    ├───repositories  # Acceso a datos (SQLite)
+    ├───services      # Lógica de negocio
+    └───utils         # Utilidades
 ```
 
 ### Patrones Implementados
@@ -127,41 +135,22 @@ pip install -r requirements.txt
 
 La aplicación ahora soporta **tres modos** de ejecución independientes:
 
-### 1. Modo Completo (Cliente + Servidor integrado)
-Ejecuta la aplicación completa con interfaz gráfica y opción de iniciar servidor desde la ventana de login.
 
-```bash
-python main.py
-```
-
-o simplemente:
-```bash
-python main.py
-```
-
-### 2. Modo Cliente Solo
+### 1. Modo Cliente Solo
 Ejecuta solo la interfaz gráfica. Se conecta a un servidor externo (debe estar corriendo por separado).
 
 ```bash
-python main.py client
+python client_app.py client
 ```
 
-o también:
-```bash
-python client.py
-```
 
-### 3. Modo Servidor Solo
+### 2. Modo Servidor Solo
 Ejecuta solo el servidor sin interfaz gráfica. Corre en consola y acepta conexiones de clientes.
 
 ```bash
-python main.py server --host 0.0.0.0 --port 5555
+python server_app.py --host 0.0.0.0 --port 5555
 ```
 
-o también:
-```bash
-python server.py --host 0.0.0.0 --port 5555
-```
 
 **Opciones del servidor:**
 - `--host`: Dirección IP a escuchar (por defecto: 0.0.0.0 - todas las interfaces)
@@ -170,22 +159,22 @@ python server.py --host 0.0.0.0 --port 5555
 **Ejemplos:**
 ```bash
 # Servidor en localhost, puerto 5555
-python server.py --host 127.0.0.1 --port 5555
+python server_app.py --host 127.0.0.1 --port 5555
 
 # Servidor accesible desde red local, puerto 8080
-python server.py --host 0.0.0.0 --port 8080
+python server_app.py --host 0.0.0.0 --port 8080
 ```
 
 ## Flujo de Trabajo Recomendado
 
 1. **Inicia el servidor** (en una terminal):
 ```bash
-python main.py server --host 127.0.0.1 --port 5555
+python server_app.py --host 127.0.0.1 --port 5555
 ```
 
 2. **Inicia el cliente** (en otra terminal):
 ```bash
-python main.py client
+python client_app.py
 ```
 
 3. En la ventana de login del cliente:
@@ -212,20 +201,20 @@ python main.py client
 2. Completa la configuración:
    - **Nombre**: Nombre del servidor
    - **Descripción**: Descripción opcional
-   - **Icono**: URL de imagen (opcional)
+   - **Icono**: URL de imagen (opcional)                        # No funcional todavia
    - **Tipo de conectividad**:
-     - `client_server`: Cliente conecta a servidor central
-     - `p2p`: Conexión directa entre pares
-     - `hybrid`: Combinación de ambos
+     - `client_server`: Cliente conecta a servidor central 
+     - `p2p`: Conexión directa entre pares                      # No implementado todavia
+     - `hybrid`: Combinación de ambos                           # No implementado todavia
    - **Nivel de seguridad**:
      - `none`: Sin encriptación
      - `basic`: Encriptación básica
      - `encrypted`: Encriptación completa
-     - `e2e`: End-to-end encryption
+     - `e2e`: End-to-end encryption                             # No implementado todavia
    - **Máximo de miembros**: Límite de usuarios
-   - **Transferencia de archivos**: Activar/desactivar
-   - **Video streaming**: Activar/desactivar
-   - **Verificación requerida**: Aprobación manual para unirse
+   - **Transferencia de archivos**: Activar/desactivar          # No funcional todavia
+   - **Video streaming**: Activar/desactivar                    # No funcional todavia
+   - **Verificación requerida**: Aprobación manual para unirse  # No funcional todavia
 
 3. Haz clic en "Crear Servidor"
 
@@ -240,9 +229,9 @@ python main.py client
    - **Privado**: Si es privado, especifica roles permitidos
    - **Posición**: Orden en la lista
 
-### Gestionar Roles
+### Gestionar Roles # Medio implementado
 
-1. En futuras versiones se añadirá UI para gestión de roles
+1. En futuras versiones se añadirá UI para gestión de roles         
 2. Por ahora, los roles se crean automáticamente:
    - `@everyone`: Rol por defecto para todos los miembros
    - `Admin`: Rol para el dueño del servidor
@@ -253,19 +242,19 @@ python main.py client
 2. Escribe tu mensaje en el campo inferior
 3. Presiona Enter o clic en "Enviar"
 
-### Invitaciones
+### Invitaciones  # No funcional todavia
 
-1. En futuras versiones se añadirá UI para generar invitaciones
+1. En futuras versiones se añadirá UI para generar invitaciones     
 2. Los usuarios podrán unirse con un código de invitación
 
-### Streaming de Video
+### Streaming de Video # No funcional todavia
 
 1. Selecciona un canal de video
 2. Haz clic en el botón de transmitir (se añadirá en UI)
 3. Selecciona cámara o pantalla
 4. Los demás miembros podrán ver la transmisión
 
-### Transferencia de Archivos
+### Transferencia de Archivos # No funcional todavia
 
 1. En un canal de texto, arrastra un archivo o usa el botón de adjuntar
 2. El archivo se subirá en chunks
@@ -274,7 +263,10 @@ python main.py client
 
 ## Estructura de Archivos
 
+        TODO Actualizar Estructura
 ```
+
+
 Chat/
 ├── main.py              # Punto de entrada
 ├── requirements.txt     # Dependencias
@@ -362,7 +354,7 @@ Chat/
 - Type hints en todas las funciones
 - Logging estructurado
 
-### Testing
+### Testing  # No actualizado todavia a version actual
 
 Para ejecutar pruebas (cuando estén implementadas):
 ```bash
@@ -382,7 +374,7 @@ Cierra otras instancias de la aplicación. La base de datos SQLite solo permite 
 ### Error: Puerto en uso
 Cambia el puerto en `config.py` o mata el proceso que usa el puerto 5555.
 
-### Logs
+### Logs # No implementado todavia
 Los logs se guardan en `logs/chat_YYYYMMDD.log`
 
 ## Licencia
@@ -395,5 +387,5 @@ Desarrollado con ❤️ usando Python y CustomTkinter.
 
 ---
 
-**Versión**: 1.0.0  
+**Versión**: 0.0.1
 **Fecha**: Marzo 2026

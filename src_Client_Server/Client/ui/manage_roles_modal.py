@@ -3,10 +3,12 @@ Modal para gestionar roles de un servidor
 """
 import customtkinter as ctk
 from typing import Callable, List, Dict, Any, Optional
-from models.role import Role, RoleCreate, RoleUpdate
-from models.enums import Permission
-from services import ServerService, PermissionService
-from utils.logger import setup_logger
+from src_Client_Server.Client.models.role import Role, RoleCreate, RoleUpdate
+from src_Client_Server.Client.models.enums import Permission
+from src_Client_Server.Client.network.service import TCPClient, NetworkMessage
+from src_Client_Server.Client.utils.config_manager import ConfigManager
+from src_Client_Server.Client.utils.logger import setup_logger
+import threading
 
 logger = setup_logger(__name__)
 
@@ -21,8 +23,16 @@ class ManageRolesModal(ctk.CTkToplevel):
         self.user_id = user_id
         self.on_save = on_save
         
-        self.server_service = ServerService()
-        self.permission_service = PermissionService()
+        # Cliente de red para comunicarse con el servidor
+        self.network_service = TCPClient()
+        self.response_event = threading.Event()
+        self.response_data = None
+        
+        # Registrar callbacks
+        self.network_service.register_callback('message', self._on_message_received)
+        
+        # Conectar al servidor
+        self._connect_to_server()
         
         # Obtener roles del servidor
         self.roles: List[Role] = []
@@ -38,13 +48,70 @@ class ManageRolesModal(ctk.CTkToplevel):
         
         self._build_ui()
     
+    def _connect_to_server(self):
+        """Conecta al servidor"""
+        server_host, server_port = ConfigManager.get_server_config()
+        if not self.network_service.connect(server_host, server_port):
+            self._show_error("No se pudo conectar al servidor")
+            return False
+        threading.Thread(target=self.network_service.start_processing, daemon=True).start()
+        return True
+    
+    def _on_message_received(self, data):
+        """Maneja los mensajes recibidos del servidor"""
+        message = data.get('message')
+        if not message:
+            return
+        # Procesar respuestas específicas
+        if message.type in ["get_roles_response", "create_role_response", 
+                           "update_role_response", "delete_role_response", 
+                           "reorder_roles_response", "check_permission_response"]:
+            self.response_data = message.data
+            self.response_event.set()
+    
     def _load_roles(self):
         """Carga los roles del servidor"""
-        from repositories import RepositoryFactory
-        roles_repo = RepositoryFactory().get_repository('roles')
-        self.roles = roles_repo.get_by_server(self.server_id)
-        # Ordenar por posición
+        get_roles_message = NetworkMessage(
+            type="get_server_roles",
+            data={"server_id": self.server_id, "user_id": self.user_id},
+            sender_id=self.user_id
+        )
+        
+        if not self.network_service.send(get_roles_message):
+            logger.error("Error enviando solicitud de roles")
+            return
+        
+        if not self.response_event.wait(timeout=5.0):
+            logger.error("Timeout esperando roles")
+            return
+        
+        if not self.response_data or not self.response_data.get("success"):
+            logger.error("Error obteniendo roles")
+            return
+        
+        roles_data = self.response_data.get("roles", [])
+        self.roles = [Role(**role_dict) for role_dict in roles_data]
         self.roles.sort(key=lambda r: r.position)
+        self.response_event.clear()
+    
+    def _has_manage_roles_permission(self) -> bool:
+        """Verifica si el usuario tiene permiso para gestionar roles"""
+        check_perm_message = NetworkMessage(
+            type="check_permission",
+            data={"server_id": self.server_id, "user_id": self.user_id, 
+                  "permission": "MANAGE_ROLES"},
+            sender_id=self.user_id
+        )
+        
+        if not self.network_service.send(check_perm_message):
+            return False
+        
+        if not self.response_event.wait(timeout=5.0):
+            return False
+        
+        result = self.response_data.get("success", False) if self.response_data else False
+        self.response_event.clear()
+        return result
     
     def _build_ui(self):
         """Construye la interfaz"""
@@ -126,15 +193,8 @@ class ManageRolesModal(ctk.CTkToplevel):
         for widget in self.roles_list_frame.winfo_children():
             widget.destroy()
         
-        # Verificar permisos
-        can_manage = self.permission_service.has_permission(
-            self.user_id, self.server_id, Permission.MANAGE_ROLES
-        )
-        
-        # Dueño siempre puede
-        server = self.server_service.get_server(self.server_id)
-        if server and server.owner_id == self.user_id:
-            can_manage = True
+        # Verificar permisos - es dueño o tiene permiso
+        can_manage = self._has_manage_roles_permission()
         
         for idx, role in enumerate(self.roles):
             self._create_role_row(self.roles_list_frame, role, idx, can_manage)
@@ -300,46 +360,60 @@ class ManageRolesModal(ctk.CTkToplevel):
         if result != "ok":
             return
         
-        # Eliminar
-        from repositories import RepositoryFactory
-        roles_repo = RepositoryFactory().get_repository('roles')
-        success = roles_repo.delete(role.id)
+        # Enviar solicitud de eliminación
+        delete_role_message = NetworkMessage(
+            type="delete_role",
+            data={"role_id": role.id, "server_id": self.server_id, "user_id": self.user_id},
+            sender_id=self.user_id
+        )
         
-        if success:
-            self._load_roles()
-            self._render_roles_list()
-        else:
-            self._show_error("Error al eliminar el rol")
-    
-    def _on_role_saved(self, role_data: Dict[str, Any], is_new: bool):
-        """Callback cuando se guarda un rol (desde EditRoleModal)"""
-        from repositories import RepositoryFactory
-        roles_repo = RepositoryFactory().get_repository('roles')
+        if not self.network_service.send(delete_role_message):
+            self._show_error("Error enviando solicitud")
+            return
         
-        if is_new:
-            # Crear nuevo rol
-            role_create = RoleCreate(
-                server_id=self.server_id,
-                name=role_data['name'],
-                color=role_data.get('color', '#99AAB5'),
-                permissions=role_data.get('permissions', []),
-                mentionable=role_data.get('mentionable', False),
-                hoisted=role_data.get('hoisted', False)
-            )
-            roles_repo.create(role_create.dict())
-        else:
-            # Actualizar rol existente
-            role_update = RoleUpdate(
-                name=role_data.get('name'),
-                color=role_data.get('color'),
-                permissions=role_data.get('permissions'),
-                mentionable=role_data.get('mentionable'),
-                hoisted=role_data.get('hoisted')
-            )
-            roles_repo.update(role_data['id'], role_update.dict(exclude_none=True))
+        if not self.response_event.wait(timeout=5.0):
+            self._show_error("Timeout esperando respuesta")
+            return
+        
+        if not self.response_data or not self.response_data.get("success"):
+            error = self.response_data.get("error", "Error al eliminar") if self.response_data else "Error"
+            self._show_error(error)
+            return
         
         self._load_roles()
         self._render_roles_list()
+        self.response_event.clear()
+    
+    def _on_role_saved(self, role_data: Dict[str, Any], is_new: bool):
+        """Callback cuando se guarda un rol (desde EditRoleModal)"""
+        message_type = "create_role" if is_new else "update_role"
+        
+        message = NetworkMessage(
+            type=message_type,
+            data={
+                "server_id": self.server_id,
+                "user_id": self.user_id,
+                **role_data
+            },
+            sender_id=self.user_id
+        )
+        
+        if not self.network_service.send(message):
+            self._show_error("Error enviando solicitud")
+            return
+        
+        if not self.response_event.wait(timeout=5.0):
+            self._show_error("Timeout esperando respuesta")
+            return
+        
+        if not self.response_data or not self.response_data.get("success"):
+            error = self.response_data.get("error", "Error al guardar") if self.response_data else "Error"
+            self._show_error(error)
+            return
+        
+        self._load_roles()
+        self._render_roles_list()
+        self.response_event.clear()
     
     def _on_save_changes(self):
         """Guarda los cambios de reordenación"""
@@ -349,9 +423,28 @@ class ManageRolesModal(ctk.CTkToplevel):
             positions[role.id] = role.position
         
         # Guardar reordenación
-        from repositories import RepositoryFactory
-        roles_repo = RepositoryFactory().get_repository('roles')
-        roles_repo.reorder_roles(self.server_id, positions)
+        reorder_message = NetworkMessage(
+            type="reorder_roles",
+            data={
+                "server_id": self.server_id,
+                "user_id": self.user_id,
+                "positions": positions
+            },
+            sender_id=self.user_id
+        )
+        
+        if not self.network_service.send(reorder_message):
+            self._show_error("Error enviando solicitud")
+            return
+        
+        if not self.response_event.wait(timeout=5.0):
+            self._show_error("Timeout esperando respuesta")
+            return
+        
+        if not self.response_data or not self.response_data.get("success"):
+            error = self.response_data.get("error", "Error al reordenar") if self.response_data else "Error"
+            self._show_error(f"Error: {error}")
+            return
         
         if self.on_save:
             self.on_save()
