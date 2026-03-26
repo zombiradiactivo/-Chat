@@ -9,13 +9,13 @@ import argparse
 from pathlib import Path
 
 # Asegurar que el directorio src esté en el path
-src_path = Path(__file__).parent / "src"
+src_path = Path(__file__).parent / "src_Client_Server/Server"
 if str(src_path) not in sys.path:
     sys.path.insert(0, str(src_path))
 
-from src.network.service import TCPServer
-from src.utils.logger import setup_logger
-from src.repositories import RepositoryFactory
+from src_Client_Server.Server.network.service import TCPServer
+from src_Client_Server.Server.utils.logger import setup_logger
+from src_Client_Server.Server.repositories import RepositoryFactory
 
 
 logger = setup_logger(__name__)

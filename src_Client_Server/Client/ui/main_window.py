@@ -7,20 +7,20 @@ from PIL import Image, ImageTk
 import threading
 import time
 
-from models.user import User
-from models.server import Server
-from models.channel import Channel, ChannelType
-from models.message import Message
-from services import AuthService, ServerService, MessageService, InviteService, PermissionService
-from src.models import enums
-from ui.components import AvatarLabel, ChannelButton, ServerButton, MessageBubble, UserListItem, ScrollableFrame
-from ui.login_window import LoginWindow
-from ui.register_window import RegisterWindow
-from ui.create_server_modal import CreateServerModal
-from ui.create_channel_modal import CreateChannelModal
-from ui.server_settings_modal import ServerSettingsModal
-from ui.manage_roles_modal import ManageRolesModal
-from utils.logger import setup_logger
+from src_Client_Server.Client.models.user import User, UserStatus
+from src_Client_Server.Client.models.server import Server
+from src_Client_Server.Client.models.channel import Channel, ChannelType
+from src_Client_Server.Client.models.message import Message
+from src_Client_Server.Client.models import enums
+from src_Client_Server.Client.ui.components import AvatarLabel, ChannelButton, ServerButton, MessageBubble, UserListItem, ScrollableFrame
+from src_Client_Server.Client.ui.login_window import ConfigManager, LoginWindow
+from src_Client_Server.Client.ui.register_window import RegisterWindow
+from src_Client_Server.Client.ui.create_server_modal import CreateServerModal
+from src_Client_Server.Client.ui.create_channel_modal import CreateChannelModal
+from src_Client_Server.Client.ui.server_settings_modal import ServerSettingsModal
+from src_Client_Server.Client.ui.manage_roles_modal import ManageRolesModal
+from src_Client_Server.Client.utils.logger import setup_logger
+from src_Client_Server.Client.network.service import TCPClient, NetworkMessage
 
 logger = setup_logger(__name__)
 
@@ -36,13 +36,15 @@ class MainWindow(ctk.CTk):
         self.geometry("1200x700")
         self.minsize(900, 500)
         
-        # Servicios
-        self.auth_service = AuthService()
-        self.server_service = ServerService()
-        self.message_service = MessageService()
-        self.invite_service = InviteService()
-        self.permission_service = PermissionService()
-        
+        # Servicios de red del cliente (para comunicarse con el servidor)
+        self.network_service = TCPClient()
+        self.is_connected = False
+        self.current_user_data = None  # Datos del usuario obtenidos del servidor
+
+        # Ip Port predeterminados
+        self.host = "127.0.0.1"
+        self.port = 5555
+
         # Estado
         self.current_user: Optional[User] = None
         self.current_server: Optional[Server] = None
@@ -255,32 +257,80 @@ class MainWindow(ctk.CTk):
     
     def _handle_login(self, username: str, password: str):
         """Maneja el login"""
-        success, error, user = self.auth_service.login(username, password)
+        # Conectar al servidor si no está conectado
+        if not self.is_connected:
+            server_host, server_port = ConfigManager.get_server_config()
+            logger.info(f" {server_host}, {server_port}")
+            if not self.network_service.connect(server_host, server_port):
+                self.login_window.show_error("No se pudo conectar al servidor")
+                return
+            self.is_connected = True
+            # Iniciar procesamiento de mensajes en segundo plano
+            threading.Thread(target=self.network_service.start_processing, daemon=True).start()
         
-        if success:
-            self.current_user = user
+        # Enviar mensaje de login al servidor
+        login_message = NetworkMessage(
+            type="login",
+            data={"username": username, "password": password},
+            sender_id="client"
+        )
+        
+        if self.network_service.send(login_message):
+            # Esperar respuesta (en una implementación real, esto sería asíncrono)
+            # Por ahora, simulamos éxito
+            self.current_user = User(id="temp_id", username=username, email="", status=UserStatus.ONLINE)
             self.login_window.destroy()
             self._load_user_servers()
             self._show_main_interface()
         else:
-            self.login_window.show_error(f"Login fallido: {error}")
+            self.login_window.show_error("Error enviando solicitud de login")
     
     def _handle_register(self, username: str, email: str, password: str):
         """Maneja el registro"""
-        success, error, user = self.auth_service.register(username, email, password)
+        # Conectar al servidor si no está conectado
+        if not self.is_connected:
+            server_host, server_port = ConfigManager.get_server_config()
+            if not self.network_service.connect(server_host, server_port = 5555):
+                self.register_window.show_error("No se pudo conectar al servidor")
+                return
+            self.is_connected = True
+            # Iniciar procesamiento de mensajes en segundo plano
+            threading.Thread(target=self.network_service.start_processing, daemon=True).start()
         
-        if success:
+        # Enviar mensaje de registro al servidor
+        register_message = NetworkMessage(
+            type="register",
+            data={"username": username, "email": email, "password": password},
+            sender_id="client"
+        )
+        
+        if self.network_service.send(register_message):
+            # Esperar respuesta (en una implementación real, esto sería asíncrono)
+            # Por ahora, simulamos éxito
             self.register_window.show_success("Cuenta creada exitosamente!")
             self.register_window.after(1500, self._back_to_login)
         else:
-            self.register_window.show_error(f"Registro fallido: {error}")
+            self.register_window.show_error("Error enviando solicitud de registro")
     
     def _load_user_servers(self):
         """Carga los servidores del usuario"""
         if not self.current_user:
             return
-        self.servers = self.auth_service.get_user_servers(self.current_user.id)
-        self._update_server_list()
+        
+        # Solicitar servidores al servidor
+        get_servers_message = NetworkMessage(
+            type="get_user_servers",
+            data={"user_id": self.current_user.id},
+            sender_id=self.current_user.id
+        )
+        
+        if self.network_service.send(get_servers_message):
+            # En una implementación real, esperaríamos la respuesta de forma asíncrona
+            # Por ahora, simulamos con datos vacíos
+            self.servers = []
+            self._update_server_list()
+        else:
+            print("Error al solicitar servidores del usuario")
     
     def _update_server_list(self):
         """Actualiza la lista de servidores en la sidebar"""
@@ -313,15 +363,11 @@ class MainWindow(ctk.CTk):
             self.server_title.configure(text=self.current_server.name)
             self.add_channel_btn.configure(state="normal")
             
-            #logger.info(self.permission_service.get_user_permissions(user_id = self.current_user.id, server_id = self.current_server.id))
+            #logger.info("Permisos verificados mediante comunicación con el servidor")
 
-            # Verificar permisos para botones
+            # Verificar permisos para botones (simplificado para cliente)
             can_manage_server = self.current_server.owner_id == self.current_user.id if self.current_user else False
-            can_manage_roles = self.permission_service.has_permission(
-                self.current_user.id, 
-                self.current_server.id, 
-                permission = enums.Permission.MANAGE_ROLES
-            ) if self.current_user else False
+            can_manage_roles = can_manage_server  # Simplificado: solo el dueño puede gestionar roles
             
             # Dueño siempre puede gestionar roles
             if can_manage_server:
@@ -340,9 +386,21 @@ class MainWindow(ctk.CTk):
         if not self.current_server:
             return
         
-        self.channels = self.server_service.get_server_channels(self.current_server.id)
-        logger.info(f"Canales cargados para servidor {self.current_server.name}: {len(self.channels)}")
-        self._update_channel_list()
+        # Solicitar canales al servidor
+        get_channels_message = NetworkMessage(
+            type="get_server_channels",
+            data={"server_id": self.current_server.id},
+            sender_id=self.current_user.id if self.current_user else "unknown"
+        )
+        
+        if self.network_service.send(get_channels_message):
+            # En una implementación real, esperaríamos la respuesta de forma asíncrona
+            # Por ahora, simulamos con datos vacíos
+            self.channels = []
+            logger.info(f"Solicitud de canales enviada para servidor {self.current_server.name}")
+            self._update_channel_list()
+        else:
+            logger.error("Error enviando solicitud de canales")
     
     def _update_channel_list(self):
         """Actualiza la lista de canales"""
@@ -402,7 +460,20 @@ class MainWindow(ctk.CTk):
             widget.destroy()
         
         # Cargar mensajes
-        self.messages = self.message_service.get_channel_messages(self.current_channel.id)
+        # Solicitar mensajes al servidor
+        get_messages_message = NetworkMessage(
+            type="get_channel_messages",
+            data={"channel_id": self.current_channel.id},
+            sender_id=self.current_user.id if self.current_user else "unknown"
+        )
+        
+        if self.network_service.send(get_messages_message):
+            # En una implementación real, esperaríamos la respuesta de forma asíncrona
+            # Por ahora, simulamos con datos vacíos
+            self.messages = []
+            self._display_messages()
+        else:
+            logger.error("Error enviando solicitud de mensajes")
         self._display_messages()
     
     def _display_messages(self):
@@ -432,40 +503,45 @@ class MainWindow(ctk.CTk):
         if not content:
             return
         
-        success, error, message = self.message_service.send_message(
-            content=content,
-            channel_id=self.current_channel.id,
-            author_id=self.current_user.id
+        # Enviar mensaje al servidor
+        send_message_message = NetworkMessage(
+            type="send_message",
+            data={
+                "content": content,
+                "channel_id": self.current_channel.id,
+                "author_id": self.current_user.id
+            },
+            sender_id=self.current_user.id
         )
         
-        if success:
+        if self.network_service.send(send_message_message):
             self.message_entry.delete(0, "end")
+            # En una implementación real, esperaríamos la confirmación del servidor
+            # Por ahora, recargamos inmediatamente
             self._load_channel_messages()
         else:
-            print(f"Error enviando mensaje: {error}")
+            print(f"Error enviando mensaje al servidor")
     
     def _load_server_members(self):
         """Carga los miembros del servidor actual"""
         if not self.current_server:
             return
         
-        members = self.server_service.get_server_members(self.current_server.id)
+        # Solicitar miembros al servidor
+        get_members_message = NetworkMessage(
+            type="get_server_members",
+            data={"server_id": self.current_server.id},
+            sender_id=self.current_user.id if self.current_user else "unknown"
+        )
         
-        # Limpiar lista
-        for widget in self.members_frame.winfo_children():
-            widget.destroy()
-        
-        # Mostrar miembros
-        for member_data in members:
-            user = member_data['user']
-            member = member_data['member']
-            
-            item = UserListItem(
-                self.members_frame,
-                username=user['username'],
-                status='online'  # Se obtendría del servicio de estado
-            )
-            item.pack(fill="x", pady=2)
+        if self.network_service.send(get_members_message):
+            # En una implementación real, esperaríamos la respuesta de forma asíncrona
+            # Por ahora, simulamos con datos vacíos y limpiamos la lista
+            for widget in self.members_frame.winfo_children():
+                widget.destroy()
+            logger.info(f"Solicitud de miembros enviada para servidor {self.current_server.name}")
+        else:
+            logger.error("Error enviando solicitud de miembros")
     
     def _on_add_server(self):
         """Muestra modal para crear servidor"""
@@ -481,15 +557,23 @@ class MainWindow(ctk.CTk):
         """Crea un nuevo servidor"""
         if not self.current_user:
             return
-        success, error, server = self.server_service.create_server(
-            owner_id=self.current_user.id,
-            **kwargs
+        
+        # Enviar solicitud de creación de servidor al servidor
+        create_server_message = NetworkMessage(
+            type="create_server",
+            data={
+                "owner_id": self.current_user.id,
+                **kwargs
+            },
+            sender_id=self.current_user.id
         )
-
-        if success:
+        
+        if self.network_service.send(create_server_message):
+            # En una implementación real, esperaríamos la respuesta de forma asíncrona
+            # Por ahora, recargamos la lista de servidores
             self._load_user_servers()
         else:
-            print(f"Error creando servidor: {error}")
+            print(f"Error enviando solicitud de creación de servidor")
     
     def _on_create_channel(self):
         """Muestra modal para crear canal"""
@@ -512,15 +596,23 @@ class MainWindow(ctk.CTk):
         # Extraer server_id de kwargs si existe para evitar duplicado
         kwargs.pop('server_id', None)
         
-        success, error, channel = self.server_service.create_channel(
-            server_id=self.current_server.id,
-            creator_id=self.current_user.id,
-            **kwargs
+        # Enviar solicitud de creación de canal al servidor
+        create_channel_message = NetworkMessage(
+            type="create_channel",
+            data={
+                "server_id": self.current_server.id,
+                "creator_id": self.current_user.id,
+                **kwargs
+            },
+            sender_id=self.current_user.id
         )
-        if success:
+        
+        if self.network_service.send(create_channel_message):
+            # En una implementación real, esperaríamos la respuesta de forma asíncrona
+            # Por ahora, recargamos la lista de canales
             self._load_server_channels()
         else:
-            print(f"Error creando canal: {error}")
+            print(f"Error enviando solicitud de creación de canal")
     
     def _on_server_settings(self):
         """Abre modal de configuración del servidor"""
@@ -569,3 +661,6 @@ class MainWindow(ctk.CTk):
         self.deiconify()
         self._load_user_servers()
 
+    def set_host_ip(self, host, port):
+        self.host = host
+        self.port = port

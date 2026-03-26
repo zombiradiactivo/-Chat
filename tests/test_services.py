@@ -77,6 +77,14 @@ class TestServerService(unittest.TestCase):
             email='admin@example.com',
             password='password123'
         )
+
+        """Test login de usuario"""
+        success, _, user = cls.auth_service.login(
+            identifier='serveradmin',
+            password='password123'
+        )
+
+
         cls.user_id = user.id if success else None
     
     def test_create_server(self):
