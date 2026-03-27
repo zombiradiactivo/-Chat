@@ -228,6 +228,8 @@ class TCPServer(NetworkService):
             
             repo_factory = RepositoryFactory()
             
+            logger.info(f"Mensaje recibido: {message}, de user id {client_id}")
+
             # Enrutar según tipo de mensaje
             if message.type == "get_server":
                 self._handle_get_server(client_id, message, repo_factory)
@@ -237,6 +239,8 @@ class TCPServer(NetworkService):
                 self._handle_get_user_servers(client_id, message, repo_factory)
             elif message.type == "get_server_channels":
                 self._handle_get_server_channels(client_id, message, repo_factory)
+            elif message.type == "get_channel_messages":
+                self._handle_get_channel_messages(client_id, message, repo_factory)
             elif message.type == "create_channel":
                 self._handle_create_channel(client_id, message, repo_factory)
             elif message.type == "delete_channel":
@@ -283,6 +287,7 @@ class TCPServer(NetworkService):
                     sender_id="server"
                 )
             self.send(client_id, response)
+            logger.info(f"Mensaje de respuesta a {client_id} , response: {response}")
         except Exception as e:
             response = NetworkMessage(
                 type="get_server_response",
@@ -290,6 +295,7 @@ class TCPServer(NetworkService):
                 sender_id="server"
             )
             self.send(client_id, response)
+            logger.info(f"Mensaje de respuesta a {client_id} , response: {response}")
     
     def _handle_update_server(self, client_id: str, message: NetworkMessage, repo_factory):
         """Maneja solicitud de actualizar servidor"""
@@ -322,6 +328,7 @@ class TCPServer(NetworkService):
                     sender_id="server"
                 )
             self.send(client_id, response)
+            logger.info(f"Mensaje de respuesta a {client_id} , response: {response}")
         except Exception as e:
             response = NetworkMessage(
                 type="update_server_response",
@@ -329,6 +336,7 @@ class TCPServer(NetworkService):
                 sender_id="server"
             )
             self.send(client_id, response)
+            logger.info(f"Mensaje de respuesta a {client_id} , response: {response}")
     
     def _handle_get_user_servers(self, client_id: str, message: NetworkMessage, repo_factory):
         """Maneja solicitud de obtener servidores del usuario"""
@@ -348,6 +356,7 @@ class TCPServer(NetworkService):
                 sender_id="server"
             )
             self.send(client_id, response)
+            logger.info(f"Mensaje de respuesta a {client_id} , response: {response}")
         except Exception as e:
             print(f"[GET_USER_SERVERS ERROR] {str(e)}")
             import traceback
@@ -358,6 +367,7 @@ class TCPServer(NetworkService):
                 sender_id="server"
             )
             self.send(client_id, response)
+            logger.info(f"Mensaje de respuesta a {client_id} , response: {response}")
     
     def _handle_get_server_channels(self, client_id: str, message: NetworkMessage, repo_factory):
         """Maneja solicitud de obtener canales del servidor"""
@@ -368,13 +378,22 @@ class TCPServer(NetworkService):
             server_id = message.data.get("server_id")
             channels = server_service.get_server_channels(server_id)
             
-            channels_data = [_serialize_for_json(c.dict()) if hasattr(c, 'dict') else _serialize_for_json(c) for c in channels]
-            response = NetworkMessage(
-                type="get_server_channels_response",
-                data={"success": True, "channels": channels_data},
-                sender_id="server"
-            )
+
+            if channels:
+                channels_data = [_serialize_for_json(c.dict()) if hasattr(c, 'dict') else _serialize_for_json(c) for c in channels]
+                response = NetworkMessage(
+                    type="get_server_channels_response",
+                    data={"success": True, "channels": channels_data},
+                    sender_id="server"
+                )
+            else:
+                response = NetworkMessage(
+                    type="get_server_channels_response",
+                    data={"success": False, "error": "Canal no encontrado"},
+                    sender_id="server"
+                )
             self.send(client_id, response)
+            logger.info(f"Mensaje de respuesta a {client_id} , response: {response}")
         except Exception as e:
             response = NetworkMessage(
                 type="get_server_channels_response",
@@ -382,7 +401,45 @@ class TCPServer(NetworkService):
                 sender_id="server"
             )
             self.send(client_id, response)
+            logger.info(f"Mensaje de respuesta a {client_id} , response: {response}")
     
+
+    def _handle_get_channel_messages(self, client_id: str, message: NetworkMessage, repo_factory):
+        """Maneja solicitud de obtener mensages de un canale """
+        try:
+            from src_Client_Server.Server.services.server_service import ServerService
+            server_service = ServerService(repo_factory)
+            
+            server_id = message.data.get("server_id")
+            channels = server_service.get(server_id)
+            
+
+            if channels:
+                channels_data = [_serialize_for_json(c.dict()) if hasattr(c, 'dict') else _serialize_for_json(c) for c in channels]
+                response = NetworkMessage(
+                    type="get_server_channels_response",
+                    data={"success": True, "channels": channels_data},
+                    sender_id="server"
+                )
+            else:
+                response = NetworkMessage(
+                    type="get_server_channels_response",
+                    data={"success": False, "error": "Canal no encontrado"},
+                    sender_id="server"
+                )
+            self.send(client_id, response)
+            logger.info(f"Mensaje de respuesta a {client_id} , response: {response}")
+        except Exception as e:
+            response = NetworkMessage(
+                type="get_server_channels_response",
+                data={"success": False, "error": str(e)},
+                sender_id="server"
+            )
+            self.send(client_id, response)
+            logger.info(f"Mensaje de respuesta a {client_id} , response: {response}")
+
+
+
     def _handle_create_channel(self, client_id: str, message: NetworkMessage, repo_factory):
         """Maneja solicitud de crear canal"""
         try:
@@ -411,6 +468,7 @@ class TCPServer(NetworkService):
                     sender_id="server"
                 )
             self.send(client_id, response)
+            logger.info(f"Mensaje de respuesta a {client_id} , response: {response}")
         except Exception as e:
             response = NetworkMessage(
                 type="create_channel_response",
@@ -418,6 +476,7 @@ class TCPServer(NetworkService):
                 sender_id="server"
             )
             self.send(client_id, response)
+            logger.info(f"Mensaje de respuesta a {client_id} , response: {response}")
     
     def _handle_delete_channel(self, client_id: str, message: NetworkMessage, repo_factory):
         """Maneja solicitud de eliminar canal"""
@@ -436,6 +495,7 @@ class TCPServer(NetworkService):
                 sender_id="server"
             )
             self.send(client_id, response)
+            logger.info(f"Mensaje de respuesta a {client_id} , response: {response}")
         except Exception as e:
             response = NetworkMessage(
                 type="delete_channel_response",
@@ -443,6 +503,7 @@ class TCPServer(NetworkService):
                 sender_id="server"
             )
             self.send(client_id, response)
+            logger.info(f"Mensaje de respuesta a {client_id} , response: {response}")
     
     def _handle_login(self, client_id: str, message: NetworkMessage, repo_factory):
         """Maneja solicitud de login"""
@@ -488,6 +549,7 @@ class TCPServer(NetworkService):
                     sender_id="server"
                 )
             self.send(client_id, response)
+            logger.info(f"Mensaje de respuesta a {client_id} , response: {response}")
         except Exception as e:
             print(f"[LOGIN ERROR] {str(e)}")
             import traceback
@@ -498,6 +560,7 @@ class TCPServer(NetworkService):
                 sender_id="server"
             )
             self.send(client_id, response)
+            logger.info(f"Mensaje de respuesta a {client_id} , response: {response}")
     
     def _handle_register(self, client_id: str, message: NetworkMessage, repo_factory):
         """Maneja solicitud de registro"""
@@ -542,6 +605,7 @@ class TCPServer(NetworkService):
                     sender_id="server"
                 )
             self.send(client_id, response)
+            logger.info(f"Mensaje de respuesta a {client_id} , response: {response}")
         except Exception as e:
             print(f"[REGISTER ERROR] {str(e)}")
             import traceback
@@ -552,6 +616,7 @@ class TCPServer(NetworkService):
                 sender_id="server"
             )
             self.send(client_id, response)
+            logger.info(f"Mensaje de respuesta a {client_id} , response: {response}")
     
     def _handle_get_server_roles(self, client_id: str, message: NetworkMessage, repo_factory):
         """Maneja solicitud de obtener roles del servidor"""
@@ -568,6 +633,7 @@ class TCPServer(NetworkService):
                 sender_id="server"
             )
             self.send(client_id, response)
+            logger.info(f"Mensaje de respuesta a {client_id} , response: {response}")
         except Exception as e:
             response = NetworkMessage(
                 type="get_roles_response",
@@ -575,6 +641,7 @@ class TCPServer(NetworkService):
                 sender_id="server"
             )
             self.send(client_id, response)
+            logger.info(f"Mensaje de respuesta a {client_id} , response: {response}")
     
     def _handle_create_role(self, client_id: str, message: NetworkMessage, repo_factory):
         """Maneja solicitud de crear rol"""
@@ -592,6 +659,7 @@ class TCPServer(NetworkService):
                     sender_id="server"
                 )
                 self.send(client_id, response)
+                logger.info(f"Mensaje de respuesta a {client_id} , response: {response}")
                 return
             
             # Crear rol
@@ -613,6 +681,7 @@ class TCPServer(NetworkService):
                 sender_id="server"
             )
             self.send(client_id, response)
+            logger.info(f"Mensaje de respuesta a {client_id} , response: {response}")
         except Exception as e:
             response = NetworkMessage(
                 type="create_role_response",
@@ -620,6 +689,7 @@ class TCPServer(NetworkService):
                 sender_id="server"
             )
             self.send(client_id, response)
+            logger.info(f"Mensaje de respuesta a {client_id} , response: {response}")
     
     def _handle_update_role(self, client_id: str, message: NetworkMessage, repo_factory):
         """Maneja solicitud de actualizar rol"""
@@ -638,6 +708,7 @@ class TCPServer(NetworkService):
                     sender_id="server"
                 )
                 self.send(client_id, response)
+                logger.info(f"Mensaje de respuesta a {client_id} , response: {response}")
                 return
             
             # Actualizar rol
@@ -652,6 +723,7 @@ class TCPServer(NetworkService):
                 sender_id="server"
             )
             self.send(client_id, response)
+            logger.info(f"Mensaje de respuesta a {client_id} , response: {response}")
         except Exception as e:
             response = NetworkMessage(
                 type="update_role_response",
@@ -659,6 +731,7 @@ class TCPServer(NetworkService):
                 sender_id="server"
             )
             self.send(client_id, response)
+            logger.info(f"Mensaje de respuesta a {client_id} , response: {response}")
     
     def _handle_delete_role(self, client_id: str, message: NetworkMessage, repo_factory):
         """Maneja solicitud de eliminar rol"""
@@ -677,6 +750,7 @@ class TCPServer(NetworkService):
                     sender_id="server"
                 )
                 self.send(client_id, response)
+                logger.info(f"Mensaje de respuesta a {client_id} , response: {response}")
                 return
             
             # Eliminar rol
@@ -689,6 +763,7 @@ class TCPServer(NetworkService):
                 sender_id="server"
             )
             self.send(client_id, response)
+            logger.info(f"Mensaje de respuesta a {client_id} , response: {response}")
         except Exception as e:
             response = NetworkMessage(
                 type="delete_role_response",
@@ -696,6 +771,7 @@ class TCPServer(NetworkService):
                 sender_id="server"
             )
             self.send(client_id, response)
+            logger.info(f"Mensaje de respuesta a {client_id} , response: {response}")
     
     def _handle_reorder_roles(self, client_id: str, message: NetworkMessage, repo_factory):
         """Maneja reordenación de roles"""
@@ -714,6 +790,7 @@ class TCPServer(NetworkService):
                     sender_id="server"
                 )
                 self.send(client_id, response)
+                logger.info(f"Mensaje de respuesta a {client_id} , response: {response}")
                 return
             
             # Reordenar roles
@@ -727,6 +804,7 @@ class TCPServer(NetworkService):
                 sender_id="server"
             )
             self.send(client_id, response)
+            logger.info(f"Mensaje de respuesta a {client_id} , response: {response}")
         except Exception as e:
             response = NetworkMessage(
                 type="reorder_roles_response",
@@ -734,6 +812,7 @@ class TCPServer(NetworkService):
                 sender_id="server"
             )
             self.send(client_id, response)
+            logger.info(f"Mensaje de respuesta a {client_id} , response: {response}")
     
     def _handle_check_permission(self, client_id: str, message: NetworkMessage, repo_factory):
         """Verifica si el usuario tiene un permiso específico"""
@@ -759,6 +838,7 @@ class TCPServer(NetworkService):
                 sender_id="server"
             )
             self.send(client_id, response)
+            logger.info(f"Mensaje de respuesta a {client_id} , response: {response}")
         except Exception as e:
             response = NetworkMessage(
                 type="check_permission_response",
@@ -766,6 +846,7 @@ class TCPServer(NetworkService):
                 sender_id="server"
             )
             self.send(client_id, response)
+            logger.info(f"Mensaje de respuesta a {client_id} , response: {response}")
     
     def send(self, target_id: str, message: NetworkMessage) -> bool:
         """Envía un mensaje a un cliente específico"""
@@ -811,6 +892,7 @@ class TCPServer(NetworkService):
             for callback in self.callbacks[event_type]:
                 try:
                     callback(data)
+                    logger.info(f"Logger de eventos: Tipo: {event_type} , Datos: {data}")
                 except Exception as e:
                     print(f"Error in callback: {e}")
 

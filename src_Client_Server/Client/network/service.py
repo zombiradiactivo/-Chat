@@ -138,6 +138,7 @@ class TCPClient(NetworkService):
         if not self.connected or not self.socket:
             return False
         try:
+            logger.info(f"Mensaje a enviar: {message.to_json}")
             self.socket.send(message.to_json().encode())
             return True
         except Exception as e:

@@ -266,7 +266,13 @@ class MainWindow(ctk.CTk):
         if not message:
             return
         # Procesar respuestas específicas
-        if message.type in ["login_response", "register_response", "get_user_servers_response"]:
+        if message.type in ["login_response", "register_response", 
+                            "get_user_servers_response", "get_server_channels_response", 
+                            "update_server_response", "create_channel_response", 
+                            "delete_channel_response", "get_roles_response",
+                            "create_role_response", "update_role_response",
+                            "delete_role_response", "reorder_roles_response",
+                            "check_permission_response" ]:
             self.response_data = message.data
             self.response_event.set()
     
@@ -347,6 +353,8 @@ class MainWindow(ctk.CTk):
             sender_id="client"
         )
         
+        print(f"[CLIENT] Enviando resgistro: username={username}, email={email}  ,password={'*' * len(password)}")
+
         if not self.network_service.send(register_message):
             self.register_window.show_error("Error enviando solicitud de registro")
             return
@@ -356,12 +364,16 @@ class MainWindow(ctk.CTk):
             self.register_window.show_error("Timeout esperando respuesta")
             return
         
+        print(f"[CLIENT] Respuesta recibida: {self.response_data}")
+
         if not self.response_data or not self.response_data.get("success"):
             error = self.response_data.get("error", "Error desconocido") if self.response_data else "Error"
             self.register_window.show_error(f"Error de registro: {error}")
             self.response_event.clear()
             return
         
+
+
         self.register_window.show_success("Cuenta creada exitosamente!")
         self.response_event.clear()
         self.register_window.after(1500, self._back_to_login)
@@ -384,18 +396,20 @@ class MainWindow(ctk.CTk):
             return
         
         # Esperar respuesta
-        if not self.response_event.wait(timeout=10.0):
+        if not self.response_event.wait(timeout=5.0):
             logger.error("Timeout esperando servidores")
             return
         
+        print(f"[CLIENT] Respuesta recibida: {self.response_data}")
+
         if not self.response_data or not self.response_data.get("success"):
             logger.error("Error obteniendo servidores")
             return
         
         servers_data = self.response_data.get("servers", [])
         self.servers = servers_data
+        logger.info(f"CHANNELS DATA : {self.servers}")
         self.response_event.clear()
-        
         self._update_server_list()
     
     def _update_server_list(self):
@@ -459,15 +473,30 @@ class MainWindow(ctk.CTk):
             sender_id=self.current_user.id if self.current_user else "unknown"
         )
         
-        if self.network_service.send(get_channels_message):
-            # En una implementación real, esperaríamos la respuesta de forma asíncrona
-            # Por ahora, simulamos con datos vacíos
-            self.channels = []
-            logger.info(f"Solicitud de canales enviada para servidor {self.current_server.name}")
-            self._update_channel_list()
-        else:
+        if not self.network_service.send(get_channels_message):
             logger.error("Error enviando solicitud de canales")
+            logger.info(get_channels_message)
+            return
     
+        # Esperar respuesta
+        if not self.response_event.wait(timeout=5.0):
+            logger.error("Timeout obteniendo respuesta en _load_server_channels")
+            return
+        
+        print(f"[CLIENT] Respuesta recibida: {self.response_data}")
+
+        if not self.response_data or not self.response_data.get("success"):
+            logger.error("Error obteniendo canales")
+            self.response_event.clear()
+            return
+            
+        channels_data = self.response_data.get("channels", [])
+        self.channels = channels_data
+        logger.info(f"CHANNELS DATA : {self.channels}")
+        self.response_event.clear()
+        self._update_channel_list()
+
+
     def _update_channel_list(self):
         """Actualiza la lista de canales"""
         # Limpiar canales (excepto el botón + Crear Canal)
@@ -476,23 +505,24 @@ class MainWindow(ctk.CTk):
                 widget.destroy()
         
         # Crear botones por tipo, comparando valores en lugar del enum directamente
-        text_channels = [c for c in self.channels if (c.type.value if hasattr(c.type, 'value') else c.type) == 'text']
-        voice_channels = [c for c in self.channels if (c.type.value if hasattr(c.type, 'value') else c.type) == 'voice']
-        # logger.info(f"Cargando canales: {len(text_channels)} de texto, {len(voice_channels)} de voz")
+        text_channels = [c for c in self.channels if c['type'] == 'text']
+        voice_channels = [c for c in self.channels if c['type'] == 'voice']
+        logger.info(f"Cargando canales: {len(text_channels)} de texto, {len(voice_channels)} de voz")
 
         for c in self.channels:
-            type_str = c.type.value if hasattr(c.type, 'value') else c.type
-            # print(f"Canal: {c.name} (ID: {c.id}, Tipo: {c.type}, Valor: {type_str})")
+            type_str = c.type.value if hasattr(c['type'], 'value') else c['type']
+            print(f"Canal: {c['name']} (ID: {c['id']}, Tipo: {c['type']}, Valor: {type_str})")
         
-        if text_channels:
+        if self.channels:
             ctk.CTkLabel(self.channels_frame, text="CANALES DE TEXTO", 
                         font=ctk.CTkFont(size=11), text_color="gray60").pack(pady=(10, 5), anchor="w", padx=5)
+            
             for channel in text_channels:
                 btn = ChannelButton(
                     self.channels_frame,
-                    channel_name=channel.name,
-                    channel_id=channel.id,
-                    channel_type=channel.type.value if hasattr(channel.type, 'value') else channel.type,
+                    channel_name=channel['name'],
+                    channel_id=channel['id'],
+                    channel_type=channel['type'],
                     command=lambda c=channel: self._select_channel(c)
                 )
                 btn.pack(pady=2, fill="x", padx=3)
@@ -503,17 +533,18 @@ class MainWindow(ctk.CTk):
             for channel in voice_channels:
                 btn = ChannelButton(
                     self.channels_frame,
-                    channel_name=channel.name,
-                    channel_id=channel.id,
-                    channel_type=channel.type.value if hasattr(channel.type, 'value') else channel.type,
+                    channel_name=channel['name'],
+                    channel_id=channel['id'],
+                    channel_type=channel['type'],
                     command=lambda c=channel: self._select_channel(c)
                 )
                 btn.pack(pady=2, fill="x", padx=3)
     
-    def _select_channel(self, channel: Channel):
+    def _select_channel(self, channel: Dict[str, Any]):
         """Selecciona un canal"""
-        self.current_channel = channel
-        self.channel_title.configure(text=f"# {channel.name}")
+        self.current_channel = Channel(**channel)
+        logger.info(self.current_channel)
+        # self.channel_title.configure(**Channel)
         self._load_channel_messages()
     
     def _load_channel_messages(self):
@@ -533,15 +564,39 @@ class MainWindow(ctk.CTk):
             sender_id=self.current_user.id if self.current_user else "unknown"
         )
         
-        if self.network_service.send(get_messages_message):
-            # En una implementación real, esperaríamos la respuesta de forma asíncrona
-            # Por ahora, simulamos con datos vacíos
-            self.messages = []
-            self._display_messages()
-        else:
-            logger.error("Error enviando solicitud de mensajes")
+        if not self.network_service.send(get_messages_message):
+            logger.error("Error enviando solicitud de canales")
+            logger.info(get_messages_message)
+            return
+        
+        # Esperar respuesta
+        if not self.response_event.wait(timeout=5.0):
+            logger.error("Timeout obteniendo respuesta en _load_channel_messages")
+            return
+        
+        print(f"[CLIENT] Respuesta recibida: {self.response_data}")
+
+        if not self.response_data or not self.response_data.get("success"):
+            logger.error("Error obteniendo canales")
+            self.response_event.clear()
+            return
+
+
+        message_data = self.response_data.get("channels", [])
+        self.messages = message_data
+        logger.info(f"CHANNELS MESSAGE DATA : {self.messages}")
+        self.response_event.clear()
         self._display_messages()
     
+
+
+
+
+
+
+
+
+
     def _display_messages(self):
         """Muestra los mensajes en el chat"""
         for message in self.messages:
