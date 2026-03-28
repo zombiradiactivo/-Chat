@@ -11,7 +11,7 @@ from src_Client_Server.Client.models.user import User, UserStatus
 from src_Client_Server.Client.models.server import Server
 from src_Client_Server.Client.models.channel import Channel, ChannelType
 from src_Client_Server.Client.models.message import Message
-from src_Client_Server.Client.models import enums
+from src_Client_Server.Client.models import ConnectionType, enums
 from src_Client_Server.Client.ui.components import AvatarLabel, ChannelButton, ServerButton, MessageBubble, UserListItem, ScrollableFrame
 from src_Client_Server.Client.ui.login_window import ConfigManager, LoginWindow
 from src_Client_Server.Client.ui.register_window import RegisterWindow
@@ -75,15 +75,13 @@ class MainWindow(ctk.CTk):
         self.grid_rowconfigure(0, weight=1)
         
         # Panel de servidores (izquierda)
-        self.server_panel = ctk.CTkFrame(self, width=72, corner_radius=0)
-        self.server_panel.grid(row=0, column=0, sticky="nsw")
-        self.server_panel.grid_propagate(False)
+        self.server_panel = ctk.CTkFrame(self, corner_radius=0)
+        self.server_panel.grid(row=0, column=0,padx=0, pady=0, sticky="nsw")
+        # self.server_panel.configure(width=1, height=1)
+        self.server_panel.grid_rowconfigure(0, weight=1)
+        # self.server_panel.grid_propagate(True)
         
-        self.server_buttons_frame = ScrollableFrame(
-            self.server_panel,
-            width=60,
-            height=self.winfo_height()
-        )
+        self.server_buttons_frame = ScrollableFrame(self.server_panel)
         self.server_buttons_frame.grid(row=0, column=0, padx=6, pady=6, sticky="nsew")
         
         # Botón para añadir servidor
@@ -101,12 +99,12 @@ class MainWindow(ctk.CTk):
         self.add_server_btn.pack(pady=(0, 10))
         
         # Separador
-        separator = ctk.CTkFrame(self, width=2, fg_color=("gray70", "gray30"))
+        separator = ctk.CTkFrame(self, width=2, fg_color=("red", "red"))
         separator.grid(row=0, column=1, sticky="ns")
         
         # Panel de canales
         self.channel_panel = ctk.CTkFrame(self, width=240, corner_radius=0)
-        self.channel_panel.grid(row=0, column=2, sticky="nsw")
+        self.channel_panel.grid(row=0, column=2, padx=0, pady=6, sticky="nsw")
         self.channel_panel.grid_columnconfigure(0, weight=1)
         self.channel_panel.grid_rowconfigure(1, weight=1)
         
@@ -167,7 +165,7 @@ class MainWindow(ctk.CTk):
         self.add_channel_btn.pack(pady=(10, 0), fill="x")
         
         # Separador
-        separator2 = ctk.CTkFrame(self, width=2, fg_color=("gray70", "gray30"))
+        separator2 = ctk.CTkFrame(self, width=2, fg_color=("red", "red")) #("gray70", "gray30")
         separator2.grid(row=0, column=3, sticky="ns")
         
         # Panel de chat
@@ -272,7 +270,9 @@ class MainWindow(ctk.CTk):
                             "delete_channel_response", "get_roles_response",
                             "create_role_response", "update_role_response",
                             "delete_role_response", "reorder_roles_response",
-                            "check_permission_response" ]:
+                            "check_permission_response", "create_server_response",
+                            "get_channel_messages_response", "send_message_response"]:
+            
             self.response_data = message.data
             self.response_event.set()
     
@@ -582,33 +582,25 @@ class MainWindow(ctk.CTk):
             return
 
 
-        message_data = self.response_data.get("channels", [])
+        message_data = self.response_data.get("messages", [])
         self.messages = message_data
         logger.info(f"CHANNELS MESSAGE DATA : {self.messages}")
         self.response_event.clear()
         self._display_messages()
     
-
-
-
-
-
-
-
-
-
     def _display_messages(self):
         """Muestra los mensajes en el chat"""
         for message in self.messages:
             # Obtener autor (simplificado)
-            author_name = f"Usuario {message.author_id[:8]}"
+            logger.info(f"Display de mensajes : MESSAGE_DATA :{self.messages}")
+            author_name = f"Usuario {message['author_id'][:8]}"
             
             bubble = MessageBubble(
                 self.messages_frame,
                 author=author_name,
-                content=message.content,
-                timestamp=message.created_at.strftime("%H:%M"),
-                is_own=(message.author_id == self.current_user.id if self.current_user else False)
+                content=message['content'],
+                timestamp=message['created_at'],
+                is_own=(message['author_id'] == self.current_user.id if self.current_user else False)
             )
             bubble.pack(fill="x", pady=5, padx=10)
         
@@ -635,13 +627,31 @@ class MainWindow(ctk.CTk):
             sender_id=self.current_user.id
         )
         
-        if self.network_service.send(send_message_message):
+        if not self.network_service.send(send_message_message):
             self.message_entry.delete(0, "end")
-            # En una implementación real, esperaríamos la confirmación del servidor
-            # Por ahora, recargamos inmediatamente
-            self._load_channel_messages()
-        else:
-            print(f"Error enviando mensaje al servidor")
+            logger.error("Error enviando solicitud de canales")
+            logger.info(send_message_message)
+            return
+        
+        # Esperar respuesta
+        if not self.response_event.wait(timeout=5.0):
+            logger.error("Timeout obteniendo respuesta en _send_message")
+            return
+        
+        print(f"[CLIENT] Respuesta recibida: {self.response_data}")
+
+        if not self.response_data or not self.response_data.get("success"):
+            logger.error("Error enviando mensaje")
+            self.response_event.clear()
+            return
+
+
+        message_data = self.response_data.get("channels", [])
+        self.messages = message_data
+        logger.info(f"SEND MESSAGE DATA : {self.messages}")
+        self.response_event.clear()
+        self._load_channel_messages()
+
     
     def _load_server_members(self):
         """Carga los miembros del servidor actual"""
@@ -683,18 +693,35 @@ class MainWindow(ctk.CTk):
         create_server_message = NetworkMessage(
             type="create_server",
             data={
-                "owner_id": self.current_user.id,
+                "user_id": self.current_user.id,
                 **kwargs
             },
             sender_id=self.current_user.id
         )
         
-        if self.network_service.send(create_server_message):
-            # En una implementación real, esperaríamos la respuesta de forma asíncrona
-            # Por ahora, recargamos la lista de servidores
-            self._load_user_servers()
-        else:
-            print(f"Error enviando solicitud de creación de servidor")
+        if not self.network_service.send(create_server_message):
+            logger.error("Error enviando solicitud creacion de servidor")
+            logger.info(create_server_message)
+            return
+
+        # Esperar respuesta
+        if not self.response_event.wait(timeout=5.0):
+            logger.error("Timeout obteniendo respuesta en _on_create_server")
+            return
+        
+        print(f"[CLIENT] Respuesta recibida: {self.response_data}")
+
+        if not self.response_data or not self.response_data.get("success"):
+            logger.error("Error creando servidor")
+            self.response_event.clear()
+            return
+            
+        logger.info(f"CHANNELS DATA : {self.servers}")
+        self.response_event.clear()
+        self._update_server_list()
+
+
+
     
     def _on_create_channel(self):
         """Muestra modal para crear canal"""

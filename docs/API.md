@@ -133,3 +133,34 @@ Repositorios específicos:
 - `ServerMemberRepository`: Miembros de servidor
 - `InviteRepository`: Invitaciones
 - `FileTransferRepository`: Transferencias de archivos
+
+# API de Mensajes
+
+Todos los tipos de mensajes:
+
+````Python
+    response = NetworkMessage(
+        type="Type",
+        data={"success": True, "user": user_dict},
+        sender_id="server"
+    )
+````
+
+Respuestas del server
+- Message Type ----: Data
+- `login_response`: Respuesta de `login` Success: True/False
+- `register_response`: Respuesta de `registro`
+- `get_user_servers_response`: Respuesta de `Conseguir listado de servidores del user`
+- `get_server_channels_response`: Respuesta del `Conseguir listado de canales de server_id`
+- `update_server_response`: Respuesta del ``
+- `create_channel_response`: Respuesta del ``
+- `delete_channel_response`: Respuesta del ``
+- `get_roles_response`: Respuesta del ``
+- `create_role_response`: Respuesta del ``
+- `update_role_response`: Respuesta del ``
+- `delete_role_response`: Respuesta del ``
+- `reorder_roles_response`: Respuesta del ``
+- `check_permission_response`: Respuesta del ``
+- `create_server_response`: Respuesta del ``
+- `get_channel_messages_respons`: Respuesta del ``
+- `send_message_response` : 

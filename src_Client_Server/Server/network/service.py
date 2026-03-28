@@ -245,6 +245,8 @@ class TCPServer(NetworkService):
                 self._handle_create_channel(client_id, message, repo_factory)
             elif message.type == "delete_channel":
                 self._handle_delete_channel(client_id, message, repo_factory)
+            elif message.type == "create_server":
+                self._handle_create_server(client_id, message, repo_factory)
             elif message.type == "login":
                 self._handle_login(client_id, message, repo_factory)
             elif message.type == "register":
@@ -261,6 +263,11 @@ class TCPServer(NetworkService):
                 self._handle_reorder_roles(client_id, message, repo_factory)
             elif message.type == "check_permission":
                 self._handle_check_permission(client_id, message, repo_factory)
+            elif message.type == "send_message":
+                self._handle_send_message(client_id, message, repo_factory)
+            else:
+                print(f"Error handling message type {message.type}")
+
         except Exception as e:
             print(f"Error handling message type {message.type}: {e}")
     
@@ -307,8 +314,7 @@ class TCPServer(NetworkService):
             user_id = message.data.get("user_id")
             
             # Extraer el resto de los datos
-            update_data = {k: v for k, v in message.data.items() 
-                          if k not in ["server_id", "user_id"]}
+            update_data = {k: v for k, v in message.data.items() if k not in ["server_id", "user_id"]}
             
             success, error, updated_server = server_service.update_server(
                 server_id, user_id, **update_data
@@ -405,39 +411,51 @@ class TCPServer(NetworkService):
     
 
     def _handle_get_channel_messages(self, client_id: str, message: NetworkMessage, repo_factory):
-        """Maneja solicitud de obtener mensages de un canale """
+        """Maneja solicitud de obtener mensajes de un canal"""
         try:
             from src_Client_Server.Server.services.server_service import ServerService
+            from src_Client_Server.Server.services.message_service import MessageService
             server_service = ServerService(repo_factory)
-            
-            server_id = message.data.get("server_id")
-            channels = server_service.get(server_id)
-            
+            message_service = MessageService(repo_factory)
 
-            if channels:
-                channels_data = [_serialize_for_json(c.dict()) if hasattr(c, 'dict') else _serialize_for_json(c) for c in channels]
+            channel_id = message.data.get("channel_id")
+
+            logger.info(f"Solicitando mensajes para el canal: {channel_id}")
+
+            messages = message_service.get_channel_messages(channel_id)
+            # Cambiamos la validación: 
+            # Si 'messages' es None, podrías considerar que el canal no existe.
+            # Si 'messages' es una lista (aunque sea []), es un éxito.
+            if messages is not None:
+                channels_messages_data = [
+                    _serialize_for_json(m.dict()) if hasattr(m, 'dict') else _serialize_for_json(m) 
+                    for m in messages
+                ]
+                
                 response = NetworkMessage(
-                    type="get_server_channels_response",
-                    data={"success": True, "channels": channels_data},
+                    type="get_channel_messages_response",
+                    data={"success": True, "messages": channels_messages_data},
                     sender_id="server"
                 )
             else:
+                # Esto solo ocurre si el servicio indica que el canal NO existe
                 response = NetworkMessage(
-                    type="get_server_channels_response",
-                    data={"success": False, "error": "Canal no encontrado"},
+                    type="get_channel_messages_response",
+                    data={"success": False, "error": "El canal especificado no existe"},
                     sender_id="server"
                 )
+
             self.send(client_id, response)
-            logger.info(f"Mensaje de respuesta a {client_id} , response: {response}")
+            logger.info(f"Respuesta enviada a {client_id}: {response} (Mensajes: {len(channels_messages_data) if messages else 0})")
+
         except Exception as e:
+            logger.error(f"Error en _handle_get_channel_messages: {str(e)}")
             response = NetworkMessage(
-                type="get_server_channels_response",
+                type="get_channel_messages_response", # Corregido el tipo (tenías get_server_channels_response)
                 data={"success": False, "error": str(e)},
                 sender_id="server"
             )
             self.send(client_id, response)
-            logger.info(f"Mensaje de respuesta a {client_id} , response: {response}")
-
 
 
     def _handle_create_channel(self, client_id: str, message: NetworkMessage, repo_factory):
@@ -505,6 +523,94 @@ class TCPServer(NetworkService):
             self.send(client_id, response)
             logger.info(f"Mensaje de respuesta a {client_id} , response: {response}")
     
+
+    def _handle_create_server(self, client_id: str, message: NetworkMessage, repo_factory):
+        """Maneja solicitud de crear canal"""
+        try:
+            from src_Client_Server.Server.services.server_service import ServerService
+            from models.enums import ConnectionType, SecurityLevel
+            server_service = ServerService(repo_factory)
+            
+            user_id = message.data.get("user_id")
+            
+            # Extraer y convertir datos del servidor
+            server_data = {}
+            for key, value in message.data.items():
+                if key == "connection_type" and isinstance(value, str):
+                    server_data[key] = ConnectionType(value)
+                elif key == "security_level" and isinstance(value, str):
+                    server_data[key] = SecurityLevel(value)
+                elif key not in ["user_id"]:
+                    server_data[key] = value
+
+            logger.info(f"Creando servidor de : {user_id}")
+
+            success, error, server = server_service.create_server(user_id, **server_data)
+            
+            if success:
+                server_data = _serialize_for_json(server.dict())
+                response = NetworkMessage(
+                    type="create_server_response",
+                    data={"success": True, "server": server_data},
+                    sender_id="server"
+                )
+            else:
+                response = NetworkMessage(
+                    type="create_server_response",
+                    data={"success": False, "error": error},
+                    sender_id="server"
+                )
+            self.send(client_id, response)
+            logger.info(f"Mensaje de respuesta a {client_id} , response: {response}")
+        except Exception as e:
+            response = NetworkMessage(
+                type="create_server_response",
+                data={"success": False, "error": str(e)},
+                sender_id="server"
+            )
+            self.send(client_id, response)
+            logger.info(f"Mensaje de respuesta a {client_id} , response: {response}")
+
+
+    def _handle_send_message(self, client_id: str, message: NetworkMessage, repo_factory):
+        """Maneja enviar mensajes a un canal"""
+        try:
+            from src_Client_Server.Server.services.message_service import MessageService
+            message_service = MessageService(repo_factory)
+
+            logger.info(f"Creando mensaje de : {client_id}")                
+
+            # ERROR CORREGIDO: Usamos message.data que es el diccionario
+            success, error, created_message = message_service.send_message(**message.data)
+            
+            if success:
+                # Serializamos el objeto mensaje si es necesario
+                message_dict = _serialize_for_json(created_message.dict()) if hasattr(created_message, 'dict') else _serialize_for_json(created_message)
+                
+                response = NetworkMessage(
+                    type="send_message_response",
+                    data={"success": True, "message": message_dict},
+                    sender_id="server"
+                )
+            else:
+                response = NetworkMessage(
+                    type="send_message_response",
+                    data={"success": False, "error": error},
+                    sender_id="server"
+                )
+            
+            self.send(client_id, response)
+            logger.info(f"Respuesta enviada a {client_id}")
+
+        except Exception as e:
+            logger.error(f"Error en _handle_send_message: {e}")
+            response = NetworkMessage(
+                type="send_message_response",
+                data={"success": False, "error": str(e)},
+                sender_id="server"
+            )
+            self.send(client_id, response)
+
     def _handle_login(self, client_id: str, message: NetworkMessage, repo_factory):
         """Maneja solicitud de login"""
         try:
@@ -899,7 +1005,7 @@ class TCPServer(NetworkService):
 
 class TCPClient(NetworkService):
     """Cliente TCP para conectarse a un servidor"""
-    
+  
     def __init__(self):
         self.socket: Optional[socket.socket] = None
         self.connected = False
@@ -909,7 +1015,7 @@ class TCPClient(NetworkService):
         self.receiver_thread: Optional[threading.Thread] = None
         self.server_address: Optional[tuple] = None
         self.server_host, self.server_port = ConfigManager.get_server_config()
-    
+  
     def connect(self, server_host: str, server_port: int = 5555) -> bool:
         """Se conecta a un servidor"""
         logger.info("Inicializando TCPClient")
@@ -922,13 +1028,13 @@ class TCPClient(NetworkService):
             logger.info(f"Connected to server at {server_host}:{server_port}")
             self.receiver_thread = threading.Thread(target=self._receive_messages, daemon=True)
             self.receiver_thread.start()
-            
+          
             return True
         except Exception as e:
             print(f"Error connecting to server: {e}")
             logger.info(f"Error connecting to server: {e}")
             return False
-    
+  
     def disconnect(self):
         """Se desconecta del servidor"""
         self.running = False
@@ -939,7 +1045,7 @@ class TCPClient(NetworkService):
             except:
                 pass
             self.socket = None
-    
+  
     def _receive_messages(self):
         """Recibe mensajes del servidor"""
         while self.running and self.socket:
@@ -947,18 +1053,18 @@ class TCPClient(NetworkService):
                 data = self.socket.recv(4096)
                 if not data:
                     break
-                
+              
                 message = NetworkMessage.from_json(data.decode())
                 self.message_queue.put(message)
-                
+              
             except Exception as e:
                 if self.running:
                     print(f"Error receiving message: {e}")
                 break
-        
+      
         self.connected = False
         self._notify_callbacks('disconnected', {})
-    
+  
     def send(self, message: NetworkMessage) -> bool:
         """Envía un mensaje al servidor"""
         if not self.connected or not self.socket:
@@ -970,21 +1076,21 @@ class TCPClient(NetworkService):
             print(f"Error sending message: {e}")
             self.connected = False
             return False
-    
+  
     def broadcast(self, message: NetworkMessage, exclude: Optional[List[str]] = None):
         """No implementado en cliente (solo envía al servidor)"""
         self.send(message)
-    
+  
     def is_connected(self) -> bool:
         """Verifica si está conectado"""
         return self.connected
-    
+  
     def register_callback(self, event_type: str, callback: Callable):
         """Registra un callback"""
         if event_type not in self.callbacks:
             self.callbacks[event_type] = []
         self.callbacks[event_type].append(callback)
-    
+  
     def start_processing(self):
         """Inicia el procesamiento de mensajes en el hilo actual"""
         while self.running:
@@ -993,7 +1099,7 @@ class TCPClient(NetworkService):
                 self._notify_callbacks('message', {'message': message})
             except queue.Empty:
                 continue
-    
+  
     def _notify_callbacks(self, event_type: str, data: Dict[str, Any]):
         """Notifica a los callbacks"""
         if event_type in self.callbacks:
@@ -1005,7 +1111,7 @@ class TCPClient(NetworkService):
 
     def start(self):
         raise NotImplementedError
-
+    
     def stop(self):
         raise NotImplementedError
-
+    
