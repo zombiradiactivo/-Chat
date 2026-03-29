@@ -9,3 +9,4 @@ cryptography
 numpy
 opencv-python
 pydantic
+pydantic[email]
