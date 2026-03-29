@@ -9,7 +9,7 @@ from pathlib import Path
 from threading import Thread, Lock
 from queue import Queue
 from .service import NetworkService, NetworkMessage
-from utils.encryption import AESEncryption
+from ..utils.encryption import AESEncryption
 
 
 class FileTransferService:

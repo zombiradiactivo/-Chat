@@ -3,8 +3,8 @@ Ventana de registro
 """
 import customtkinter as ctk
 from typing import Callable
-from models.user import UserCreate
-from utils.validation import validate_username, validate_email, validate_password
+from ..models.user import UserCreate
+from ..utils.validation import validate_username, validate_email, validate_password
 
 
 class RegisterWindow(ctk.CTkToplevel):

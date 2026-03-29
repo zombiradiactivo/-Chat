@@ -5,9 +5,9 @@ from typing import Optional, List, Dict, Any, Tuple
 from datetime import datetime, timedelta
 import uuid
 
-from repositories import RepositoryFactory
-from models.invite import Invite, InviteCreate
-from utils.logger import setup_logger
+from ..repositories import RepositoryFactory
+from ..models.invite import Invite, InviteCreate
+from ..utils.logger import setup_logger
 
 logger = setup_logger(__name__)
 
@@ -72,7 +72,7 @@ class InviteService:
                 return False, "Servidor no encontrado", None
             
             # Verificar si ya es miembro
-            from repositories import RepositoryFactory
+            from ..repositories import RepositoryFactory
             members_repo = RepositoryFactory().get_repository('server_members')
             if members_repo.is_member(user_id, invite.server_id):
                 return False, "Ya eres miembro de este servidor", None

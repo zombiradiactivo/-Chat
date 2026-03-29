@@ -6,11 +6,11 @@ import sys
 from pathlib import Path
 
 # Añadir src al path
-sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
+sys.path.insert(0, str(Path(__file__).parent.parent / "src_Client_Server"))
 
-from src.services.auth_service import AuthService
-from src.services.server_service import ServerService
-from src.utils.validation import validate_username, validate_email, validate_password
+from src_Client_Server.Server.services.auth_service import AuthService
+from src_Client_Server.Server.services.server_service import ServerService
+from src_Client_Server.Server.utils.validation import validate_username, validate_email, validate_password
 
 
 class TestAuthService(unittest.TestCase):

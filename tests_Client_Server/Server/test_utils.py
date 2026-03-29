@@ -8,9 +8,9 @@ import tempfile
 import os
 
 # Añadir src al path
-sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
+sys.path.insert(0, str(Path(__file__).parent.parent / "src_Client_Server"))
 
-from src.utils import (
+from src_Client_Server.Server.utils import (
     generate_id,
     generate_invite_code,
     format_file_size,

@@ -8,7 +8,7 @@ from pathlib import Path
 
 # Configurar path
 test_dir = Path(__file__).parent
-src_path = test_dir.parent / "src"
+src_path = test_dir.parent / "src_Client_Server"
 sys.path.insert(0, str(src_path))
 
 # Configurar base de datos de test

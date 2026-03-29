@@ -263,10 +263,17 @@ class MainWindow(ctk.CTk):
         message = data.get('message')
         if not message:
             return
+        
+        # Manejar mensajes de broadcast (no son respuestas, son actualizaciones en tiempo real)
+        if message.type == "message_broadcast":
+            logger.info(f" MESSAGE DATA DE message_broadcast:{message}")
+            self._handle_message_broadcast(message.data)
+            return
+        
         # Procesar respuestas específicas
-        if message.type in ["login_response", "register_response", 
-                            "get_user_servers_response", "get_server_channels_response", 
-                            "update_server_response", "create_channel_response", 
+        if message.type in ["login_response", "register_response",
+                            "get_user_servers_response", "get_server_channels_response",
+                            "update_server_response", "create_channel_response",
                             "delete_channel_response", "get_roles_response",
                             "create_role_response", "update_role_response",
                             "delete_role_response", "reorder_roles_response",
@@ -275,6 +282,38 @@ class MainWindow(ctk.CTk):
             
             self.response_data = message.data
             self.response_event.set()
+    
+    def _handle_message_broadcast(self, data):
+        """Maneja mensajes de broadcast (mensajes recibidos de otros usuarios)"""
+        if not self.current_channel or not self.current_user:
+            return
+        
+        # Verificar si el mensaje es para este canal
+        channel_id = data.get('channel_id')
+        if channel_id != self.current_channel.id:
+            return
+        
+        message_data = data.get('message', {})
+        
+        # Crear objeto Message con los datos del broadcast
+        message_dict = {
+            'id': message_data.get('id'),
+            'content': message_data.get('content'),
+            'author_id': message_data.get('author_id'),
+            'created_at': message_data.get('created_at'),
+            'message_type': message_data.get('message_type', 'text'),
+            'channel_id': channel_id,
+            'server_id': data.get('server_id')
+        }
+        
+        # Crear objeto Message
+        new_message = Message(**message_dict)
+        
+        # Agregar a la lista de mensajes
+        self.messages.append(new_message)
+        
+        # Actualizar UI
+        self._display_messages()
     
     def _handle_login(self, username: str, password: str):
         """Maneja el login"""

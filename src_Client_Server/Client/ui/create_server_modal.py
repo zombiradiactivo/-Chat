@@ -3,7 +3,7 @@ Modal para crear servidor
 """
 import customtkinter as ctk
 from typing import Callable, Dict, Any
-from models.enums import ConnectionType, SecurityLevel
+from ..models.enums import ConnectionType, SecurityLevel
 
 
 class CreateServerModal(ctk.CTkToplevel):

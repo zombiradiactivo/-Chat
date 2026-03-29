@@ -6,14 +6,14 @@ import sys
 from pathlib import Path
 
 # Añadir src al path
-sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
+sys.path.insert(0, str(Path(__file__).parent.parent / "src_Client_Server"))
 
-from src.models.user import User, UserCreate
-from src.models.server import Server, ServerCreate
-from src.models.channel import Channel, ChannelCreate
-from src.models.message import Message, MessageCreate
-from src.models.role import Role, RoleCreate
-from src.utils.validation import validate_username, validate_email, validate_password
+from src_Client_Server.Server.models.user import User, UserCreate
+from src_Client_Server.Server.models.server import Server, ServerCreate
+from src_Client_Server.Server.models.channel import Channel, ChannelCreate
+from src_Client_Server.Server.models.message import Message, MessageCreate
+from src_Client_Server.Server.models.role import Role, RoleCreate
+from src_Client_Server.Server.utils.validation import validate_username, validate_email, validate_password
 
 
 class TestModels(unittest.TestCase):

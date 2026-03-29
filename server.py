@@ -98,7 +98,7 @@ class ChatServer:
     
     def _create_directories(self):
         """Crea los directorios necesarios"""
-        from src.utils import get_app_data_dir, get_uploads_dir, get_avatars_dir, get_banners_dir
+        from src_Client_Server.Server.utils import get_app_data_dir, get_uploads_dir, get_avatars_dir, get_banners_dir
         
         get_app_data_dir()
         get_uploads_dir()

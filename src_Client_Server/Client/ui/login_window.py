@@ -10,7 +10,7 @@ from pathlib import Path
 
 import customtkinter as ctk
 from typing import Callable, Optional
-from models.user import UserCreate
+from ..models.user import UserCreate
 from src_Client_Server.Client.network.service import TCPClient
 from src_Client_Server.Client.utils.config_manager import ConfigManager
 

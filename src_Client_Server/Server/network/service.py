@@ -528,7 +528,7 @@ class TCPServer(NetworkService):
         """Maneja solicitud de crear canal"""
         try:
             from src_Client_Server.Server.services.server_service import ServerService
-            from models.enums import ConnectionType, SecurityLevel
+            from ..models.enums import ConnectionType, SecurityLevel
             server_service = ServerService(repo_factory)
             
             user_id = message.data.get("user_id")
@@ -576,9 +576,10 @@ class TCPServer(NetworkService):
         """Maneja enviar mensajes a un canal"""
         try:
             from src_Client_Server.Server.services.message_service import MessageService
+            from src_Client_Server.Server.repositories import RepositoryFactory
             message_service = MessageService(repo_factory)
 
-            logger.info(f"Creando mensaje de : {client_id}")                
+            logger.info(f"Creando mensaje de : {client_id}")
 
             # ERROR CORREGIDO: Usamos message.data que es el diccionario
             success, error, created_message = message_service.send_message(**message.data)
@@ -592,15 +593,43 @@ class TCPServer(NetworkService):
                     data={"success": True, "message": message_dict},
                     sender_id="server"
                 )
+                self.send(client_id, response)
+                logger.info(f"Respuesta enviada a {client_id}")
+                
+                # BROADCAST: Enviar el mensaje a todos los clientes conectados al mismo servidor (excluyendo al autor)
+                # Obtener el canal del mensaje
+                channel = message_service.channels_repo.get_by_id(message.data.get('channel_id'))
+                if channel:
+                    server = repo_factory.get_repository('servers').get_by_id(channel.server_id)
+                    if server:
+                        # Crear mensaje de broadcast con el canal y servidor
+                        broadcast_msg_dict = {
+                            "type": "message_broadcast",
+                            "data": {
+                                "message": message_dict,
+                                "channel_id": channel.id,
+                                "server_id": server.id
+                            },
+                            "sender_id": "server"
+                        }
+                        
+                        # Enviar a todos los clientes conectados al mismo servidor (excluyendo al autor)
+                        with self.lock:
+                            for connected_client_id in list(self.clients.keys()):
+                                if connected_client_id != client_id:  # Excluir al autor
+                                    try:
+                                        broadcast_msg_json = json.dumps(broadcast_msg_dict)
+                                        self.clients[connected_client_id].send(broadcast_msg_json.encode())
+                                        logger.info(f"Broadcast de mensaje a {connected_client_id} para canal {channel.id}")
+                                    except Exception as e:
+                                        logger.error(f"Error enviando broadcast a {connected_client_id}: {e}")
             else:
                 response = NetworkMessage(
                     type="send_message_response",
                     data={"success": False, "error": error},
                     sender_id="server"
                 )
-            
-            self.send(client_id, response)
-            logger.info(f"Respuesta enviada a {client_id}")
+                self.send(client_id, response)
 
         except Exception as e:
             logger.error(f"Error en _handle_send_message: {e}")

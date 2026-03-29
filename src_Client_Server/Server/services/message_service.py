@@ -5,10 +5,10 @@ from typing import Optional, List, Dict, Any, Tuple
 from datetime import datetime
 import uuid
 
-from repositories import RepositoryFactory
-from models.message import Message, MessageCreate, MessageUpdate
-from models.enums import MessageType
-from utils.logger import setup_logger
+from ..repositories import RepositoryFactory
+from ..models.message import Message, MessageCreate, MessageUpdate
+from ..models.enums import MessageType
+from ..utils.logger import setup_logger
 
 logger = setup_logger(__name__)
 

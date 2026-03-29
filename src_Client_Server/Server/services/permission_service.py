@@ -2,11 +2,11 @@
 Servicio de permisos
 """
 from typing import List, Set, Optional
-from repositories import RepositoryFactory
-from models.enums import Permission
-from models.role import Role
-from models.server_member import ServerMember
-from utils.logger import setup_logger
+from ..repositories import RepositoryFactory
+from ..models.enums import Permission
+from ..models.role import Role
+from ..models.server_member import ServerMember
+from ..utils.logger import setup_logger
 
 logger = setup_logger(__name__)
 

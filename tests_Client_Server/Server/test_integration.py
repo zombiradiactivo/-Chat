@@ -6,13 +6,13 @@ import sys
 from pathlib import Path
 
 # Añadir src al path
-sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
+sys.path.insert(0, str(Path(__file__).parent.parent / "src_Client_Server"))
 
-from src.services.auth_service import AuthService
-from src.services.server_service import ServerService
-from src.services.message_service import MessageService
-from src.services.invite_service import InviteService
-from src.repositories import RepositoryFactory
+from src_Client_Server.Server.services.auth_service import AuthService
+from src_Client_Server.Server.services.server_service import ServerService
+from src_Client_Server.Server.services.message_service import MessageService
+from src_Client_Server.Server.services.invite_service import InviteService
+from src_Client_Server.Server.repositories import RepositoryFactory
 
 
 class TestIntegration(unittest.TestCase):
@@ -63,7 +63,7 @@ class TestIntegration(unittest.TestCase):
         self.assertIsNotNone(server)
         
         # 3. Crear canal
-        from src.models.enums import ChannelType
+        from src_Client_Server.Server.models.enums import ChannelType
         success, error, channel = self.server_service.create_channel(
             server_id=server.id,
             creator_id=user.id,
@@ -114,7 +114,7 @@ class TestIntegration(unittest.TestCase):
         self.assertIsNotNone(joined_server)
         
         # 8. Verificar que el segundo usuario es miembro
-        from src.repositories import RepositoryFactory
+        from src_Client_Server.Server.repositories import RepositoryFactory
         members_repo = RepositoryFactory().get_repository('server_members')
         is_member = members_repo.is_member(user2.id, server.id)
         self.assertTrue(is_member)

@@ -3,7 +3,7 @@ Modal para crear canal
 """
 import customtkinter as ctk
 from typing import Callable
-from models.enums import ChannelType
+from ..models.enums import ChannelType
 
 
 class CreateChannelModal(ctk.CTkToplevel):

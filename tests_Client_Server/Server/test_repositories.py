@@ -7,15 +7,15 @@ import os
 from pathlib import Path
 
 # Añadir src al path
-sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
+sys.path.insert(0, str(Path(__file__).parent.parent / "src_Client_Server"))
 
 # Configurar base de datos de test
 test_db = Path(__file__).parent / "test.db"
 os.environ['TEST_DB_PATH'] = str(test_db)
 
-from src.repositories.user_repository import UserRepository
-from src.repositories.server_repository import ServerRepository
-from src.models.user import UserCreate
+from src_Client_Server.Server.repositories.user_repository import UserRepository
+from src_Client_Server.Server.repositories.server_repository import ServerRepository
+from src_Client_Server.Server.models.user import UserCreate
 
 
 class TestUserRepository(unittest.TestCase):

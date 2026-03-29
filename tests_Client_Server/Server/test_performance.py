@@ -7,11 +7,11 @@ from pathlib import Path
 import time
 import threading
 
-sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
+sys.path.insert(0, str(Path(__file__).parent.parent / "src_Client_Server"))
 
-from src.repositories import RepositoryFactory
-from src.services import AuthService, MessageService
-from src.network.service import TCPServer, TCPClient, NetworkMessage
+from src_Client_Server.Server.repositories import RepositoryFactory
+from src_Client_Server.Server.services import AuthService, MessageService
+from src_Client_Server.Server.network.service import TCPServer, TCPClient, NetworkMessage
 
 
 class TestPerformance(unittest.TestCase):

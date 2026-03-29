@@ -6,13 +6,13 @@ from datetime import datetime
 import uuid
 import json
 
-from repositories import RepositoryFactory
-from models.server import Server, ServerCreate, ServerUpdate
-from models.channel import Channel, ChannelCreate
-from models.role import Role, RoleCreate
-from models.server_member import ServerMember
-from models.enums import ChannelType, ConnectionType, SecurityLevel, Permission
-from utils.logger import setup_logger
+from ..repositories import RepositoryFactory
+from ..models.server import Server, ServerCreate, ServerUpdate
+from ..models.channel import Channel, ChannelCreate
+from ..models.role import Role, RoleCreate
+from ..models.server_member import ServerMember
+from ..models.enums import ChannelType, ConnectionType, SecurityLevel, Permission
+from ..utils.logger import setup_logger
 
 logger = setup_logger(__name__)
 
@@ -31,7 +31,7 @@ class ServerService:
         """Crea un nuevo servidor"""
         try:
             # Validar nombre
-            from utils.validation import validate_server_name
+            from ..utils.validation import validate_server_name
             is_valid, error = validate_server_name(kwargs.get('name', ''))
             if not is_valid:
                 return False, error, None
@@ -143,7 +143,7 @@ class ServerService:
             if not self._has_permission(creator_id, server_id, Permission.MANAGE_CHANNELS):
                 return False, "No tienes permiso para crear canales", None
             
-            from utils.validation import validate_channel_name
+            from ..utils.validation import validate_channel_name
             is_valid, error = validate_channel_name(kwargs.get('name', ''))
             if not is_valid:
                 return False, error, None

@@ -36,7 +36,7 @@ El sistema de configuración permite guardar y cargar las preferencias de la apl
 
 ### Cargar configuración
 ```python
-from utils.config_manager import ConfigManager
+from ..utils.config_manager import ConfigManager
 
 # Obtener toda la configuración
 config = ConfigManager.load_config()
@@ -51,7 +51,7 @@ last_user = ConfigManager.get_last_username()
 
 ### Guardar configuración
 ```python
-from utils.config_manager import ConfigManager
+from ..utils.config_manager import ConfigManager
 
 # Guardar configuración del servidor
 ConfigManager.set_server_config('192.168.1.100', 5555)
