@@ -107,7 +107,7 @@ class MessageService:
             logger.error(f"Error eliminando mensaje: {e}")
             return False, "Error interno del servidor"
     
-    def get_channel_messages(self, channel_id: str, limit: int = 50, before: Optional[str] = None) -> List[Message]:
+    def get_channel_messages(self, channel_id: str, limit: int = 20, before: Optional[str] = None) -> List[Message]:
         """Obtiene mensajes de un canal"""
         try:
             messages = self.messages_repo.get_by_channel(channel_id, limit, before)

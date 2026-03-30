@@ -20,7 +20,13 @@ class TestPerformance(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         """Configuración"""
-        cls.repo_factory = RepositoryFactory("data/perf_test.db")
+
+        # Usar base de datos de test
+        import os
+        test_db = Path(__file__).parent / "perf_test.db"
+        os.environ['TEST_DB_PATH'] = str(test_db)
+        
+        cls.repo_factory = RepositoryFactory(str(test_db))
         cls.repo_factory.initialize_database()
         cls.auth_service = AuthService()
     
@@ -28,7 +34,7 @@ class TestPerformance(unittest.TestCase):
     def tearDownClass(cls):
         """Limpieza"""
         cls.repo_factory.close_all()
-        test_db = Path("data/perf_test.db")
+        test_db = Path(__file__).parent / "perf_test.db"
         if test_db.exists():
             test_db.unlink()
     

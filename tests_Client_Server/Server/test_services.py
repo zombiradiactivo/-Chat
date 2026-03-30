@@ -1,6 +1,7 @@
 """
 Tests para servicios
 """
+import os
 import unittest
 import sys
 from pathlib import Path
@@ -8,6 +9,11 @@ from pathlib import Path
 # Añadir src al path
 sys.path.insert(0, str(Path(__file__).parent.parent / "src_Client_Server"))
 
+# Configurar base de datos de test
+test_db = Path(__file__).parent / "test.db"
+os.environ['TEST_DB_PATH'] = str(test_db)
+
+from src_Client_Server.Server.repositories import RepositoryFactory
 from src_Client_Server.Server.services.auth_service import AuthService
 from src_Client_Server.Server.services.server_service import ServerService
 from src_Client_Server.Server.utils.validation import validate_username, validate_email, validate_password
@@ -19,8 +25,18 @@ class TestAuthService(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         """Configuración inicial"""
-        cls.auth_service = AuthService()
+        cls.repo_factory = RepositoryFactory(str(test_db))
+        cls.auth_service = AuthService(cls.repo_factory)
     
+    @classmethod
+    def tearDownClass(cls):
+        """Limpieza"""
+        cls.repo_factory.close_all()
+        if test_db.exists():
+            test_db.unlink()
+
+
+
     def test_register_user(self):
         """Test registro de usuario"""
         success, error, user = self.auth_service.register(

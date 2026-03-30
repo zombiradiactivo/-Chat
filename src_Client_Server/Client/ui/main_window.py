@@ -45,6 +45,8 @@ class MainWindow(ctk.CTk):
         # Response handling
         self.response_event = threading.Event()
         self.response_data = None
+        self.broadcast_event = threading.Event()
+        self.broadcast_data = None
 
         # Ip Port predeterminados
         self.host = "127.0.0.1"
@@ -81,7 +83,7 @@ class MainWindow(ctk.CTk):
         self.server_panel.grid_rowconfigure(0, weight=1)
         # self.server_panel.grid_propagate(True)
         
-        self.server_buttons_frame = ScrollableFrame(self.server_panel)
+        self.server_buttons_frame = ctk.CTkScrollableFrame(self.server_panel)
         self.server_buttons_frame.grid(row=0, column=0, padx=6, pady=6, sticky="nsew")
         
         # Botón para añadir servidor
@@ -149,7 +151,7 @@ class MainWindow(ctk.CTk):
         self.roles_btn.grid(row=0, column=2, padx=(5, 10), pady=15)
         
         # Lista de canales
-        self.channels_frame = ScrollableFrame(self.channel_panel)
+        self.channels_frame = ctk.CTkScrollableFrame(self.channel_panel)
         self.channels_frame.grid(row=1, column=0, sticky="nsew", padx=10, pady=10)
         
         # Botón para crear canal
@@ -227,7 +229,7 @@ class MainWindow(ctk.CTk):
         )
         members_title.grid(row=0, column=0, pady=15, padx=15, sticky="w")
         
-        self.members_frame = ScrollableFrame(self.members_panel)
+        self.members_frame = ctk.CTkScrollableFrame(self.members_panel)
         self.members_frame.grid(row=1, column=0, sticky="nsew", padx=10, pady=(0, 10))
         
         # Configurar pesos
@@ -266,8 +268,9 @@ class MainWindow(ctk.CTk):
         
         # Manejar mensajes de broadcast (no son respuestas, son actualizaciones en tiempo real)
         if message.type == "message_broadcast":
-            logger.info(f" MESSAGE DATA DE message_broadcast:{message}")
+            logger.info(f" MESSAGE DATA DE message_broadcast: {message.data}")
             self._handle_message_broadcast(message.data)
+            self.broadcast_data = message.data
             return
         
         # Procesar respuestas específicas
@@ -280,6 +283,7 @@ class MainWindow(ctk.CTk):
                             "check_permission_response", "create_server_response",
                             "get_channel_messages_response", "send_message_response"]:
             
+            logger.info(f" MESSAGE DATA DE message_broadcast: {message.data}")
             self.response_data = message.data
             self.response_event.set()
     
@@ -287,33 +291,33 @@ class MainWindow(ctk.CTk):
         """Maneja mensajes de broadcast (mensajes recibidos de otros usuarios)"""
         if not self.current_channel or not self.current_user:
             return
-        
+        self.broadcast_data = data
+
+        print(f"[BROADCAST_MESSAGE DATA: {self.broadcast_data}]")
+
         # Verificar si el mensaje es para este canal
-        channel_id = data.get('channel_id')
+        channel_id = self.broadcast_data.get('channel_id', [])
+        print(f"[BROADCAST_MESSAGE channel id: {channel_id}")
         if channel_id != self.current_channel.id:
             return
         
-        message_data = data.get('message', {})
+        server_id = self.broadcast_data.get('server_id', [])
+        print(f"[BROADCAST_MESSAGE server_id: {server_id}")
         
-        # Crear objeto Message con los datos del broadcast
-        message_dict = {
-            'id': message_data.get('id'),
-            'content': message_data.get('content'),
-            'author_id': message_data.get('author_id'),
-            'created_at': message_data.get('created_at'),
-            'message_type': message_data.get('message_type', 'text'),
-            'channel_id': channel_id,
-            'server_id': data.get('server_id')
-        }
-        
+        message_data = self.broadcast_data.get('message', [])
+        print(f"[BROADCAST_MESSAGE mensaje: {message_data}")
+
+
+
         # Crear objeto Message
-        new_message = Message(**message_dict)
-        
+        print(f"[BROADCAST_MESSAGE APENDIZANDO")
+
         # Agregar a la lista de mensajes
-        self.messages.append(new_message)
-        
+        self.messages.append(message_data)
+        print(f"[BROADCAST_MESSAGE APENDIZANO")
+
         # Actualizar UI
-        self._display_messages()
+        self._display_new_message(message_data)
     
     def _handle_login(self, username: str, password: str):
         """Maneja el login"""
@@ -642,6 +646,25 @@ class MainWindow(ctk.CTk):
                 is_own=(message['author_id'] == self.current_user.id if self.current_user else False)
             )
             bubble.pack(fill="x", pady=5, padx=10)
+        
+            # Scroll al final
+            self.messages_frame._parent_canvas.yview_moveto(1.0)
+    
+    def _display_new_message(self, message):
+        """Muestra los mensajes en el chat"""
+
+        # Obtener autor (simplificado)
+        logger.info(f"Display de mensajes : MESSAGE_DATA :{self.messages}")
+        author_name = f"Usuario {message['author_id'][:8]}"
+        
+        bubble = MessageBubble(
+            self.messages_frame,
+            author=author_name,
+            content=message['content'],
+            timestamp=message['created_at'],
+            is_own=(message['author_id'] == self.current_user.id if self.current_user else False)
+        )
+        bubble.pack(fill="x", pady=5, padx=10)
         
         # Scroll al final
         self.messages_frame._parent_canvas.yview_moveto(1.0)

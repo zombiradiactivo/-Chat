@@ -603,26 +603,26 @@ class TCPServer(NetworkService):
                     server = repo_factory.get_repository('servers').get_by_id(channel.server_id)
                     if server:
                         # Crear mensaje de broadcast con el canal y servidor
-                        broadcast_msg_dict = {
-                            "type": "message_broadcast",
-                            "data": {
+                        broadcast_msg = NetworkMessage(
+                            type= "message_broadcast",
+                            data= {
                                 "message": message_dict,
                                 "channel_id": channel.id,
                                 "server_id": server.id
                             },
-                            "sender_id": "server"
-                        }
+                            sender_id= "server"
+                        )
                         
                         # Enviar a todos los clientes conectados al mismo servidor (excluyendo al autor)
                         with self.lock:
                             for connected_client_id in list(self.clients.keys()):
                                 if connected_client_id != client_id:  # Excluir al autor
                                     try:
-                                        broadcast_msg_json = json.dumps(broadcast_msg_dict)
-                                        self.clients[connected_client_id].send(broadcast_msg_json.encode())
+                                        # broadcast_msg_json = json.dumps(broadcast_msg)
+                                        self.send(connected_client_id, broadcast_msg)
                                         logger.info(f"Broadcast de mensaje a {connected_client_id} para canal {channel.id}")
                                     except Exception as e:
-                                        logger.error(f"Error enviando broadcast a {connected_client_id}: {e}")
+                                        logger.error(f"Error enviando broadcast a {client_id}: {e}")
             else:
                 response = NetworkMessage(
                     type="send_message_response",

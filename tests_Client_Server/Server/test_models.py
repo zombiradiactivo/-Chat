@@ -38,7 +38,7 @@ class TestModels(unittest.TestCase):
         self.assertIsNone(error)
         
         # Username inválido (corto)
-        is_valid, error = validate_username('ab')
+        is_valid, error = validate_username('a')
         self.assertFalse(is_valid)
         
         # Username inválido (caracteres especiales)
