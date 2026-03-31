@@ -25,23 +25,42 @@ class TestAuthService(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         """Configuración inicial"""
+        # Ensure a clean test database
+        import os
+        if test_db.exists():
+            test_db.unlink()
+
         cls.repo_factory = RepositoryFactory(str(test_db))
+        cls.repo_factory.initialize_database()
         cls.auth_service = AuthService(cls.repo_factory)
     
     @classmethod
     def tearDownClass(cls):
         """Limpieza"""
         cls.repo_factory.close_all()
-        if test_db.exists():
+        import gc
+        import src_Client_Server.Server.repositories as repos_mod
+        try:
             test_db.unlink()
+        except PermissionError:
+            rf = repos_mod.RepositoryFactory(str(test_db))
+            rf.close_all()
+            del rf
+            gc.collect()
+            try:
+                test_db.unlink()
+            except PermissionError:
+                pass
 
 
 
     def test_register_user(self):
         """Test registro de usuario"""
+        import uuid
+        username = f"user_{uuid.uuid4().hex[:8]}"
         success, error, user = self.auth_service.register(
-            username='newuser',
-            email='new@example.com',
+            username=username,
+            email=f'{username}@example.com',
             password='password123'
         )
         self.assertTrue(success)
@@ -50,18 +69,30 @@ class TestAuthService(unittest.TestCase):
     
     def test_register_duplicate_username(self):
         """Test registro con username duplicado"""
+        # Register a user, then attempt to register another with same username
+        username = 'dupuser'
         success, error, user = self.auth_service.register(
-            username='newuser',
-            email='different@example.com',
+            username=username,
+            email='dup1@example.com',
             password='password123'
         )
-        self.assertFalse(success)
-        self.assertIsNotNone(error)
+        self.assertTrue(success)
+
+        success2, error2, user2 = self.auth_service.register(
+            username=username,
+            email='dup2@example.com',
+            password='password123'
+        )
+        self.assertFalse(success2)
+        self.assertIsNotNone(error2)
     
     def test_login_user(self):
         """Test login de usuario"""
+        # Create a user specifically for login test
+        username = 'loginuser'
+        self.auth_service.register(username=username, email='login@example.com', password='password123')
         success, error, user = self.auth_service.login(
-            identifier='newuser',
+            identifier=username,
             password='password123'
         )
         self.assertTrue(success)
@@ -70,8 +101,11 @@ class TestAuthService(unittest.TestCase):
     
     def test_login_wrong_password(self):
         """Test login con contraseña incorrecta"""
+        # Ensure user exists
+        username = 'loginuser2'
+        self.auth_service.register(username=username, email='login2@example.com', password='password123')
         success, error, user = self.auth_service.login(
-            identifier='newuser',
+            identifier=username,
             password='wrongpassword'
         )
         self.assertFalse(success)
@@ -84,22 +118,28 @@ class TestServerService(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         """Configuración inicial"""
-        cls.server_service = ServerService()
-        cls.auth_service = AuthService()
+        # Use the test database for services
+        cls.repo_factory = RepositoryFactory(str(test_db))
+        cls.repo_factory.initialize_database()
+        cls.server_service = ServerService(cls.repo_factory)
+        cls.auth_service = AuthService(cls.repo_factory)
         
         # Crear usuario de prueba
+        # Create and login a test user
         success, _, user = cls.auth_service.register(
             username='serveradmin',
             email='admin@example.com',
             password='password123'
         )
 
-        """Test login de usuario"""
+        if not success:
+            cls.user_id = None
+            return
+
         success, _, user = cls.auth_service.login(
             identifier='serveradmin',
             password='password123'
         )
-
 
         cls.user_id = user.id if success else None
     

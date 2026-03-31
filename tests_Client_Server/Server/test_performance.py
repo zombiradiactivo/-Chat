@@ -25,54 +25,103 @@ class TestPerformance(unittest.TestCase):
         import os
         test_db = Path(__file__).parent / "perf_test.db"
         os.environ['TEST_DB_PATH'] = str(test_db)
-        
+        # Ensure clean DB
+        if test_db.exists():
+            test_db.unlink()
+
         cls.repo_factory = RepositoryFactory(str(test_db))
         cls.repo_factory.initialize_database()
-        cls.auth_service = AuthService()
+        from src_Client_Server.Server.services.auth_service import AuthService
+        cls.auth_service = AuthService(cls.repo_factory)
     
     @classmethod
     def tearDownClass(cls):
         """Limpieza"""
         cls.repo_factory.close_all()
+        import gc
+        import src_Client_Server.Server.repositories as repos_mod
         test_db = Path(__file__).parent / "perf_test.db"
-        if test_db.exists():
+        try:
             test_db.unlink()
+        except PermissionError:
+            rf = repos_mod.RepositoryFactory(str(test_db))
+            rf.close_all()
+            del rf
+            gc.collect()
+            try:
+                test_db.unlink()
+            except PermissionError:
+                pass
     
     def test_concurrent_user_registration(self):
         """Test de registro concurrente de usuarios"""
-        def register_user(i):
-            return self.auth_service.register(
-                username=f'user{i}',
-                email=f'user{i}@test.com',
-                password='password123'
-            )
-        
+        def register_user(i, results_list):
+            # Create a separate RepositoryFactory per thread to avoid sharing the same sqlite connection
+            from src_Client_Server.Server.repositories import RepositoryFactory as RF
+            from src_Client_Server.Server.services.auth_service import AuthService
+            import uuid
+            test_db_local = Path(__file__).parent / "perf_test.db"
+            rf = RF(str(test_db_local))
+            # Ensure repos are initialized
+            rf.initialize_database()
+            try:
+                auth = AuthService(rf)
+                uname = f'user_{uuid.uuid4().hex[:8]}'
+                res = auth.register(
+                    username=uname,
+                    email=f'{uname}@test.com',
+                    password='password123'
+                )
+                results_list.append(res)
+            finally:
+                rf.close_all()
+
         threads = []
         results = []
-        
+
         for i in range(10):
-            t = threading.Thread(target=lambda i=i: results.append(register_user(i)))
+            t = threading.Thread(target=register_user, args=(i, results))
             threads.append(t)
             t.start()
-        
+
         for t in threads:
             t.join()
-        
+
         # Verificar que todos se registraron exitosamente
-        successes = [r[0] for r in results if r[0]]
+        successes = [r[0] for r in results if r and r[0]]
         self.assertEqual(len(successes), 10)
     
     def test_message_throughput(self):
         """Test de throughput de mensajes"""
-        # Crear usuario y canal
+        # Crear usuario, servidor y canal reales en la DB de prueba
+        import uuid
+        uname = f'perftest_{uuid.uuid4().hex[:8]}'
         success, _, user = self.auth_service.register(
-            username='perftest',
-            email='perftest@test.com',
+            username=uname,
+            email=f'{uname}@test.com',
             password='password123'
         )
         self.assertTrue(success)
-        
-        message_service = MessageService()
+
+        # Crear servidor
+        from src_Client_Server.Server.models.enums import ConnectionType, SecurityLevel, ChannelType
+        servers_repo = self.repo_factory.get_repository('servers')
+        server_id = servers_repo.create({
+            'name': 'perf_server',
+            'owner_id': user.id,
+            'connection_type': ConnectionType.CLIENT_SERVER,
+            'security_level': SecurityLevel.BASIC
+        })
+
+        # Crear canal
+        channels_repo = self.repo_factory.get_repository('channels')
+        channel_id = channels_repo.create({
+            'server_id': server_id,
+            'name': 'perf_channel',
+            'type': ChannelType.TEXT
+        })
+
+        message_service = MessageService(self.repo_factory)
         
         # Enviar 100 mensajes y medir tiempo
         start_time = time.time()

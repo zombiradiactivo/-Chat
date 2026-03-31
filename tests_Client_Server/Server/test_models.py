@@ -10,6 +10,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "src_Client_Server"))
 
 from src_Client_Server.Server.models.user import User, UserCreate
 from src_Client_Server.Server.models.server import Server, ServerCreate
+from src_Client_Server.Server.models.enums import ConnectionType, SecurityLevel
 from src_Client_Server.Server.models.channel import Channel, ChannelCreate
 from src_Client_Server.Server.models.message import Message, MessageCreate
 from src_Client_Server.Server.models.role import Role, RoleCreate
@@ -69,13 +70,12 @@ class TestServerModel(unittest.TestCase):
         """Test creación de servidor"""
         server_data = {
             'name': 'Test Server',
-            'owner_id': 'user123',
-            'connection_type': 'client_server',
-            'security_level': 'encrypted'
+            'connection_type': ConnectionType.CLIENT_SERVER,
+            'security_level': SecurityLevel.ENCRYPTED
         }
         server = ServerCreate(**server_data)
         self.assertEqual(server.name, 'Test Server')
-        self.assertEqual(server.owner_id, 'user123')
+        self.assertEqual(server.connection_type, ConnectionType.CLIENT_SERVER)
 
 
 if __name__ == '__main__':

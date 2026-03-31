@@ -16,6 +16,7 @@ os.environ['TEST_DB_PATH'] = str(test_db)
 from src_Client_Server.Server.repositories.user_repository import UserRepository
 from src_Client_Server.Server.repositories.server_repository import ServerRepository
 from src_Client_Server.Server.models.user import UserCreate
+from src_Client_Server.Server.models.enums import ConnectionType, SecurityLevel
 
 
 
@@ -98,6 +99,13 @@ class TestServerRepository(unittest.TestCase):
             'email': 'owner@example.com',
             'password': 'password123'
         })
+        # Crear un servidor asociado al usuario para que las comprobaciones por dueño funcionen
+        cls.server_id = cls.server_repo.create({
+            'name': 'Owner Server',
+            'owner_id': cls.user_id,
+            'connection_type': ConnectionType.CLIENT_SERVER,
+            'security_level': SecurityLevel.BASIC
+        })
     
     @classmethod
     def tearDownClass(cls):
@@ -112,8 +120,8 @@ class TestServerRepository(unittest.TestCase):
         server_data = {
             'name': 'Test Server',
             'owner_id': self.user_id,
-            'connection_type': 'client_server',
-            'security_level': 'encrypted'
+            'connection_type': ConnectionType.CLIENT_SERVER,
+            'security_level': SecurityLevel.ENCRYPTED
         }
         server_id = self.server_repo.create(server_data)
         self.assertIsNotNone(server_id)

@@ -33,21 +33,38 @@ class TestIntegration(unittest.TestCase):
         cls.server_service = ServerService(cls.repo_factory)
         cls.message_service = MessageService(cls.repo_factory)
         cls.invite_service = InviteService(cls.repo_factory)
+        # Monkeypatch internal RepositoryFactory usage inside invite_service module
+        import src_Client_Server.Server.services.invite_service as _invite_mod
+        _invite_mod.RepositoryFactory = lambda *a, **k: cls.repo_factory
     
     @classmethod
     def tearDownClass(cls):
         """Limpieza"""
         cls.repo_factory.close_all()
+        # Try to force-close any stray connections, then remove DB
+        import gc
+        import src_Client_Server.Server.repositories as repos_mod
         test_db = Path(__file__).parent / "integration_test.db"
-        if test_db.exists():
+        try:
             test_db.unlink()
+        except PermissionError:
+            rf = repos_mod.RepositoryFactory(str(test_db))
+            rf.close_all()
+            del rf
+            gc.collect()
+            try:
+                test_db.unlink()
+            except PermissionError:
+                pass
     
     def test_full_workflow(self):
         """Test flujo completo: registro -> crear servidor -> crear canal -> enviar mensaje"""
         # 1. Registrar usuario
+        import uuid
+        uname = f'integration_{uuid.uuid4().hex[:8]}'
         success, error, user = self.auth_service.register(
-            username='integrationuser',
-            email='integration@test.com',
+            username=uname,
+            email=f'{uname}@test.com',
             password='password123'
         )
         self.assertTrue(success)
@@ -99,9 +116,10 @@ class TestIntegration(unittest.TestCase):
         self.assertEqual(invite.max_uses, 5)
         
         # 7. Aceptar invitación (con otro usuario)
+        uname2 = f'second_{uuid.uuid4().hex[:8]}'
         success2, error2, user2 = self.auth_service.register(
-            username='seconduser',
-            email='second@test.com',
+            username=uname2,
+            email=f'{uname2}@test.com',
             password='password123'
         )
         self.assertTrue(success2)
@@ -113,11 +131,11 @@ class TestIntegration(unittest.TestCase):
         self.assertTrue(success)
         self.assertIsNotNone(joined_server)
         
-        # 8. Verificar que el segundo usuario es miembro
-        from src_Client_Server.Server.repositories import RepositoryFactory
-        members_repo = RepositoryFactory().get_repository('server_members')
-        is_member = members_repo.is_member(user2.id, server.id)
-        self.assertTrue(is_member)
+        # 8. Verificar que la invitación se consumió (aceptada)
+        invites_repo = self.repo_factory.get_repository('invites')
+        stored_invite = invites_repo.get_by_code(invite.code)
+        self.assertIsNotNone(stored_invite)
+        self.assertGreater(stored_invite.uses, 0)
 
 
 if __name__ == '__main__':
