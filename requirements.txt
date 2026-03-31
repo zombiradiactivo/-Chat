@@ -10,3 +10,5 @@ numpy
 opencv-python
 pydantic
 pydantic[email]
+flask
+flask-socketio

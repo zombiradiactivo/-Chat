@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Chat App - Web Client</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.2/socket.io.min.js"></script>
+</head>
+<body>
+    <!-- Login Screen -->
+    <div id="login-screen" class="screen active">
+        <div class="auth-container">
+            <h1 class="logo">&#128172; Chat App</h1>
+            <p class="subtitle">Inicia sesion para continuar</p>
+
+            <div class="form-group">
+                <input type="text" id="login-email" placeholder="Usuario o Email" autocomplete="off">
+            </div>
+            <div class="form-group">
+                <input type="password" id="login-password" placeholder="Contrasena">
+            </div>
+
+            <div class="server-config">
+                <label>Configuracion del Servidor</label>
+                <div class="server-row">
+                    <input type="text" id="login-host" placeholder="Host (127.0.0.1)" value="127.0.0.1">
+                    <input type="number" id="login-port" placeholder="Puerto" value="5555">
+                </div>
+            </div>
+
+            <div class="form-group checkbox-group">
+                <label><input type="checkbox" id="remember-me"> Recordar usuario</label>
+            </div>
+
+            <button id="login-btn" class="btn btn-primary" onclick="handleLogin()">Iniciar Sesion</button>
+            <div id="login-error" class="error-msg"></div>
+
+            <hr>
+            <button class="btn btn-secondary" onclick="showRegister()">Crear Cuenta</button>
+        </div>
+    </div>
+
+    <!-- Register Screen -->
+    <div id="register-screen" class="screen">
+        <div class="auth-container">
+            <h1 class="logo">Crear Cuenta</h1>
+
+            <div class="form-group">
+                <input type="text" id="reg-username" placeholder="Nombre de usuario" autocomplete="off">
+            </div>
+            <div class="form-group">
+                <input type="text" id="reg-email" placeholder="Email" autocomplete="off">
+            </div>
+            <div class="form-group">
+                <input type="password" id="reg-password" placeholder="Contrasena">
+            </div>
+
+            <button class="btn btn-primary" onclick="handleRegister()">Registrarse</button>
+            <div id="register-error" class="error-msg"></div>
+            <div id="register-success" class="success-msg"></div>
+
+            <hr>
+            <button class="btn btn-secondary" onclick="showLogin()">Volver al Login</button>
+        </div>
+    </div>
+
+    <!-- Chat Screen -->
+    <div id="chat-screen" class="screen">
+        <!-- Server Sidebar -->
+        <div class="server-sidebar">
+            <div class="server-list" id="server-list">
+                <button class="server-add-btn" onclick="showCreateServer()" title="Crear Servidor">+</button>
+            </div>
+        </div>
+
+        <!-- Channel Sidebar -->
+        <div class="channel-sidebar">
+            <div class="channel-header">
+                <button class="icon-btn" id="settings-btn" onclick="showServerSettings()" disabled>&#9881;</button>
+                <span id="server-name">Selecciona un servidor</span>
+                <button class="icon-btn" id="roles-btn" onclick="showManageRoles()" disabled>&#128101;</button>
+            </div>
+            <div class="channel-list" id="channel-list">
+                <button class="btn btn-sm btn-outline" onclick="showCreateChannel()" id="create-channel-btn" disabled>+ Crear Canal</button>
+            </div>
+        </div>
+
+        <!-- Chat Panel -->
+        <div class="chat-panel">
+            <div class="chat-header">
+                <span id="channel-name"># Selecciona un canal</span>
+            </div>
+            <div class="messages-container" id="messages-container"></div>
+            <div class="message-input-area">
+                <input type="text" id="message-input" placeholder="Escribe un mensaje..." onkeypress="handleMessageKeypress(event)">
+                <button class="btn btn-primary btn-send" onclick="sendMessage()">Enviar</button>
+            </div>
+        </div>
+
+        <!-- Members Sidebar -->
+        <div class="members-sidebar">
+            <div class="members-header">Miembros</div>
+            <div class="members-list" id="members-list"></div>
+        </div>
+    </div>
+
+    <!-- Create Server Modal -->
+    <div id="create-server-modal" class="modal">
+        <div class="modal-content">
+            <h2>Crear Servidor</h2>
+            <div class="form-group">
+                <input type="text" id="new-server-name" placeholder="Nombre del servidor">
+            </div>
+            <div class="form-group">
+                <input type="text" id="new-server-description" placeholder="Descripcion (opcional)">
+            </div>
+            <div class="modal-actions">
+                <button class="btn btn-secondary" onclick="closeModal('create-server-modal')">Cancelar</button>
+                <button class="btn btn-primary" onclick="createServer()">Crear</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Create Channel Modal -->
+    <div id="create-channel-modal" class="modal">
+        <div class="modal-content">
+            <h2>Crear Canal</h2>
+            <div class="form-group">
+                <input type="text" id="new-channel-name" placeholder="Nombre del canal">
+            </div>
+            <div class="form-group">
+                <select id="new-channel-type">
+                    <option value="text">Texto</option>
+                    <option value="voice">Voz</option>
+                </select>
+            </div>
+            <div class="modal-actions">
+                <button class="btn btn-secondary" onclick="closeModal('create-channel-modal')">Cancelar</button>
+                <button class="btn btn-primary" onclick="createChannel()">Crear</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Server Settings Modal -->
+    <div id="server-settings-modal" class="modal">
+        <div class="modal-content">
+            <h2>Configuracion del Servidor</h2>
+            <div class="form-group">
+                <label>Nombre</label>
+                <input type="text" id="settings-server-name">
+            </div>
+            <div class="form-group">
+                <label>Descripcion</label>
+                <input type="text" id="settings-server-desc">
+            </div>
+            <div class="modal-actions">
+                <button class="btn btn-secondary" onclick="closeModal('server-settings-modal')">Cancelar</button>
+                <button class="btn btn-primary" onclick="saveServerSettings()">Guardar</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Manage Roles Modal -->
+    <div id="manage-roles-modal" class="modal">
+        <div class="modal-content modal-lg">
+            <h2>Gestion de Roles</h2>
+            <div class="roles-container">
+                <div class="roles-list" id="roles-list"></div>
+                <div class="role-form">
+                    <h3>Nuevo Rol</h3>
+                    <div class="form-group">
+                        <input type="text" id="new-role-name" placeholder="Nombre del rol">
+                    </div>
+                    <div class="form-group">
+                        <input type="color" id="new-role-color" value="#99AAB5">
+                    </div>
+                    <button class="btn btn-primary" onclick="createRole()">Crear Rol</button>
+                </div>
+            </div>
+            <div class="modal-actions">
+                <button class="btn btn-secondary" onclick="closeModal('manage-roles-modal')">Cerrar</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+</body>
+</html>
