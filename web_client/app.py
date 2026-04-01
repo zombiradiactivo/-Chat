@@ -61,23 +61,47 @@ class TCPBridge:
             self.socket = None
 
     def send(self, message_dict):
-        """Envía un mensaje al servidor TCP"""
+        """Envía un mensaje al servidor TCP con longitud prefijada"""
         if not self.connected or not self.socket:
             return False
         try:
             json_str = json.dumps(message_dict)
-            self.socket.send(json_str.encode())
+            msg_bytes = json_str.encode()
+            length_header = len(msg_bytes).to_bytes(4, 'big')
+            self.socket.sendall(length_header + msg_bytes)
             return True
         except Exception as e:
             print(f"Error sending to TCP: {e}")
             self.connected = False
             return False
 
+    def _recv_exact(self, num_bytes):
+        """Lee exactamente num_bytes del socket"""
+        data = b''
+        while len(data) < num_bytes:
+            chunk = self.socket.recv(num_bytes - len(data))
+            if not chunk:
+                return b''
+            data += chunk
+        return data
+
     def _receive_messages(self):
-        """Recibe mensajes del servidor TCP y los reenvía al WebSocket"""
+        """Recibe mensajes del servidor TCP con longitud prefijada"""
         while self.running and self.socket:
             try:
-                data = self.socket.recv(4096)
+                # Leer los 4 bytes de longitud
+                header = self._recv_exact(4)
+                if not header:
+                    break
+
+                msg_length = int.from_bytes(header, 'big')
+
+                if msg_length > 10 * 1024 * 1024:
+                    print(f"Mensaje demasiado grande: {msg_length} bytes")
+                    break
+
+                # Leer el mensaje completo
+                data = self._recv_exact(msg_length)
                 if not data:
                     break
 

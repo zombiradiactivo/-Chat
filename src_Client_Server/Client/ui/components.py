@@ -182,8 +182,13 @@ class UserListItem(ctk.CTkFrame):
     """Item de usuario en la lista de miembros"""
     
     def __init__(self, master, username: str, status: str = "online", 
-                 roles: list = None, **kwargs):
+                 roles: list = None, user_id: str = "", role_color: str = "#7289DA",
+                 on_assign_role=None, **kwargs):
         super().__init__(master, **kwargs)
+        
+        self.user_id = user_id
+        self.username = username
+        self.on_assign_role = on_assign_role
         
         self.configure(fg_color="transparent", height=32)
         
@@ -194,17 +199,18 @@ class UserListItem(ctk.CTkFrame):
             width=24,
             height=24,
             corner_radius=12,
-            fg_color="#7289DA",
+            fg_color=role_color,
             text_color="white",
             font=ctk.CTkFont(size=10)
         )
         avatar.pack(side="left", padx=(0, 8))
         
-        # Nombre
+        # Nombre con color de rol
         name_label = ctk.CTkLabel(
             self,
             text=username,
-            anchor="w"
+            anchor="w",
+            text_color=role_color if role_color != "#7289DA" else None
         )
         name_label.pack(side="left", fill="x", expand=True)
         
@@ -227,3 +233,55 @@ class UserListItem(ctk.CTkFrame):
             fg_color=status_color
         )
         status_dot.pack(side="right", padx=8)
+        
+        # Botón de asignar rol (solo si hay callback)
+        if on_assign_role:
+            assign_btn = ctk.CTkButton(
+                self,
+                text="⚙",
+                width=24,
+                height=24,
+                fg_color="transparent",
+                hover_color=("gray75", "gray35"),
+                font=ctk.CTkFont(size=12),
+                command=self._show_role_menu
+            )
+            assign_btn.pack(side="right", padx=2)
+    
+    def _show_role_menu(self):
+        """Muestra un menú para asignar/remover roles"""
+        if self.on_assign_role:
+            # Crear ventana de selección de roles
+            menu = ctk.CTkToplevel(self)
+            menu.title(f"Roles de {self.username}")
+            menu.geometry("300x250")
+            menu.resizable(False, False)
+            menu.transient(self.winfo_toplevel())
+            menu.grab_set()
+            
+            # Centrar
+            menu.update_idletasks()
+            x = (menu.winfo_screenwidth() // 2) - 150
+            y = (menu.winfo_screenheight() // 2) - 125
+            menu.geometry(f'300x250+{x}+{y}')
+            
+            ctk.CTkLabel(
+                menu,
+                text=f"Asignar roles a {self.username}",
+                font=ctk.CTkFont(size=14, weight="bold")
+            ).pack(pady=(15, 10))
+            
+            # Nota: Los roles se cargan desde el callback del padre
+            info_label = ctk.CTkLabel(
+                menu,
+                text="Usa el modal de Gestión de Roles\npara asignar roles específicos.",
+                text_color="gray60",
+                wraplength=250
+            )
+            info_label.pack(pady=20)
+            
+            ctk.CTkButton(
+                menu,
+                text="Cerrar",
+                command=menu.destroy
+            ).pack(pady=10)

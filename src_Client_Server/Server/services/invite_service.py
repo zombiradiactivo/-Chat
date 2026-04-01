@@ -82,9 +82,15 @@ class InviteService:
                 return False, "El servidor está lleno", None
             
             # Unir al usuario
+            # Obtener rol por defecto
+            roles_repo = self.repo_factory.get_repository('roles')
+            default_role = roles_repo.get_default_role(invite.server_id)
+            role_ids = [default_role.id] if default_role else []
+            
             members_repo.create({
                 'user_id': user_id,
-                'server_id': invite.server_id
+                'server_id': invite.server_id,
+                'role_ids': role_ids
             })
             
             # Incrementar contador

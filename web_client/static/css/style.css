@@ -717,3 +717,179 @@ hr {
 .connection-status.connecting {
     background: #faa61a;
 }
+
+/* Call Controls */
+.call-controls {
+    display: flex;
+    gap: 5px;
+    align-items: center;
+}
+
+.call-controls .icon-btn {
+    font-size: 16px;
+    padding: 4px 8px;
+}
+
+.call-controls .call-active {
+    background: var(--danger);
+}
+
+/* File attach button */
+.file-attach-btn {
+    cursor: pointer;
+    font-size: 18px;
+    padding: 4px 8px;
+    color: var(--text-muted);
+    display: flex;
+    align-items: center;
+}
+
+.file-attach-btn:hover {
+    color: var(--text-primary);
+}
+
+/* Members sidebar */
+.member-item {
+    display: flex;
+    align-items: center;
+    padding: 6px 10px;
+    border-radius: 4px;
+    gap: 8px;
+}
+
+.member-item:hover {
+    background: var(--bg-hover);
+}
+
+.member-avatar {
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 11px;
+    font-weight: bold;
+    color: white;
+}
+
+.member-name {
+    flex: 1;
+    font-size: 13px;
+}
+
+.member-status {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+}
+
+.no-members {
+    color: var(--text-muted);
+    text-align: center;
+    padding: 20px;
+    font-size: 13px;
+}
+
+/* Invites */
+.invites-list {
+    max-height: 200px;
+    overflow-y: auto;
+    margin-bottom: 10px;
+}
+
+.invite-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px;
+    background: var(--bg-light);
+    border-radius: 4px;
+    margin-bottom: 5px;
+}
+
+.invite-code {
+    font-weight: bold;
+    color: var(--accent);
+    font-size: 14px;
+}
+
+.invite-info {
+    flex: 1;
+    color: var(--text-muted);
+    font-size: 12px;
+}
+
+.no-invites {
+    color: var(--text-muted);
+    text-align: center;
+    padding: 15px;
+}
+
+.btn-danger {
+    background: var(--danger) !important;
+    color: white !important;
+}
+
+/* File message */
+.file-attachment {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 14px;
+    background: var(--bg-light);
+    border-radius: 8px;
+    margin-top: 6px;
+    border: 1px solid var(--border-color);
+}
+
+.file-icon {
+    font-size: 22px;
+    flex-shrink: 0;
+}
+
+.file-info {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+}
+
+.file-name {
+    font-size: 13px;
+    font-weight: 500;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.file-size {
+    color: var(--text-muted);
+    font-size: 11px;
+}
+
+.btn-download {
+    background: var(--accent);
+    color: white;
+    border: none;
+    padding: 6px 14px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 12px;
+    width: 150px;
+    white-space: nowrap;
+    flex-shrink: 0;
+}
+
+.btn-download:hover {
+    background: var(--accent-hover);
+}
+
+.load-more-btn {
+    display: block;
+    width: 100%;
+    margin-bottom: 10px;
+    padding: 6px;
+    font-size: 12px;
+}

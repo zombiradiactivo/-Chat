@@ -9,6 +9,8 @@ let servers = [];
 let channels = [];
 let messages = [];
 let isTcpConnected = false;
+let messagesHasMore = false;
+let loadingMoreMessages = false;
 
 // Promesas para respuestas del servidor
 let pendingResponse = null;
@@ -85,6 +87,30 @@ function handleServerMessage(message) {
             handleBroadcast(message.data);
             break;
         case 'check_permission_response':
+            break;
+        case 'get_server_members_response':
+            handleMembersResponse(message.data);
+            break;
+        case 'create_invite_response':
+        case 'get_server_invites_response':
+        case 'revoke_invite_response':
+        case 'accept_invite_response':
+            if (pendingResponse) {
+                pendingResponse.resolve(message.data);
+                pendingResponse = null;
+            }
+            break;
+        case 'upload_file_response':
+        case 'download_file_response':
+            if (pendingResponse) {
+                pendingResponse.resolve(message.data);
+                pendingResponse = null;
+            }
+            break;
+        case 'call_started':
+        case 'call_user_joined':
+        case 'call_user_left':
+            console.log('Evento de llamada:', message.type, message.data);
             break;
         default:
             console.log('Tipo de mensaje no manejado:', message.type);
@@ -296,7 +322,7 @@ function selectServer(server) {
     currentServer = server;
     currentChannel = null;
     document.getElementById('server-name').textContent = server.name;
-    document.getElementById('channel-name').textContent = 'Selecciona un canal';
+    document.getElementById('channel-name').textContent = '# Selecciona un canal';
     document.getElementById('messages-container').innerHTML = '';
 
     // Habilitar botones
@@ -304,9 +330,11 @@ function selectServer(server) {
     document.getElementById('settings-btn').disabled = !isOwner;
     document.getElementById('roles-btn').disabled = !isOwner;
     document.getElementById('create-channel-btn').disabled = false;
+    document.getElementById('invite-btn').disabled = false;
 
     renderServerList();
     loadServerChannels();
+    loadServerMembers();
 }
 
 // ==================== CANALES ====================
@@ -377,9 +405,16 @@ function createChannelItem(channel) {
 
 function selectChannel(channel) {
     currentChannel = channel;
-    document.getElementById('channel-name').textContent = channel.name;
+    document.getElementById('channel-name').textContent = '# ' + channel.name;
     renderChannelList();
     loadChannelMessages();
+
+    // Habilitar botones de llamada según tipo de canal
+    const isVoice = channel.type === 'voice' || channel.type === 'video';
+    const isVideo = channel.type === 'video';
+    document.getElementById('voice-call-btn').disabled = !isVoice;
+    document.getElementById('video-call-btn').disabled = !isVideo;
+    document.getElementById('screen-share-btn').disabled = !isVoice;
 }
 
 // ==================== MENSAJES ====================
@@ -387,7 +422,12 @@ function selectChannel(channel) {
 function loadChannelMessages() {
     if (!currentChannel) return;
 
-    sendTcpMessage('get_channel_messages', { channel_id: currentChannel.id })
+    messages = [];
+    messagesHasMore = false;
+    loadingMoreMessages = false;
+    document.getElementById('messages-container').innerHTML = '';
+
+    sendTcpMessage('get_channel_messages', { channel_id: currentChannel.id, limit: 10 })
         .then(data => handleMessagesResponse(data))
         .catch(err => console.error('Error cargando mensajes:', err));
 }
@@ -400,19 +440,66 @@ function handleMessagesResponse(data) {
         return;
     }
 
-    messages = data.messages || [];
+    const newMessages = data.messages || [];
+    messagesHasMore = data.has_more || false;
+    messages = newMessages;
     renderMessages();
 }
 
 function renderMessages() {
     const container = document.getElementById('messages-container');
+    const wasAtTop = container.scrollTop <= 10;
+    const previousHeight = container.scrollHeight;
+
     container.innerHTML = '';
+
+    if (messagesHasMore) {
+        const loadMoreBtn = document.createElement('button');
+        loadMoreBtn.className = 'btn btn-sm btn-outline load-more-btn';
+        loadMoreBtn.textContent = 'Cargar mensajes anteriores';
+        loadMoreBtn.onclick = loadMoreMessages;
+        container.appendChild(loadMoreBtn);
+    }
 
     messages.forEach(msg => {
         container.appendChild(createMessageElement(msg));
     });
 
-    scrollToBottom();
+    if (wasAtTop && previousHeight > 0) {
+        container.scrollTop = container.scrollHeight - previousHeight;
+    } else {
+        scrollToBottom();
+    }
+}
+
+function loadMoreMessages() {
+    if (!currentChannel || !messages.length || loadingMoreMessages) return;
+
+    loadingMoreMessages = true;
+    const oldestMessage = messages[0];
+    const beforeId = oldestMessage.id;
+
+    sendTcpMessage('get_channel_messages', {
+        channel_id: currentChannel.id,
+        limit: 10,
+        before: beforeId
+    })
+        .then(data => {
+            loadingMoreMessages = false;
+            if (!data || !data.success) return;
+
+            const olderMessages = data.messages || [];
+            messagesHasMore = data.has_more || false;
+
+            if (olderMessages.length > 0) {
+                messages = [...olderMessages, ...messages];
+                renderMessages();
+            }
+        })
+        .catch(err => {
+            loadingMoreMessages = false;
+            console.error('Error cargando más mensajes:', err);
+        });
 }
 
 function createMessageElement(msg) {
@@ -426,6 +513,31 @@ function createMessageElement(msg) {
     const initial = authorName.charAt(0).toUpperCase();
     const time = formatTime(msg.created_at);
 
+    const messageType = msg.message_type || 'text';
+    let contentHtml = '';
+
+    if (messageType === 'file') {
+        const attachments = msg.attachments || [];
+        attachments.forEach(att => {
+            const sizeText = att.file_size > 1024 * 1024
+                ? (att.file_size / (1024 * 1024)).toFixed(1) + ' MB'
+                : (att.file_size / 1024).toFixed(1) + ' KB';
+            const downloadUrl = att.download_url || '';
+            const filename = att.filename || 'archivo';
+            contentHtml += `
+                <div class="file-attachment">
+                    <span class="file-icon">&#128206;</span>
+                    <div class="file-info">
+                        <span class="file-name">${escapeHtml(filename)}</span>
+                        <span class="file-size">${sizeText}</span>
+                    </div>
+                    ${downloadUrl ? `<button class="btn btn-download" onclick="downloadFile('${escapeHtml(downloadUrl)}', '${escapeHtml(filename)}')">⬇ Descargar</button>` : ''}
+                </div>`;
+        });
+    } else {
+        contentHtml = `<div class="message-text">${escapeHtml(msg.content)}</div>`;
+    }
+
     div.innerHTML = `
         <div class="message-avatar">${initial}</div>
         <div class="message-content">
@@ -433,7 +545,7 @@ function createMessageElement(msg) {
                 <span class="message-author">${authorName}</span>
                 <span class="message-time">${time}</span>
             </div>
-            <div class="message-text">${escapeHtml(msg.content)}</div>
+            ${contentHtml}
         </div>
     `;
 
@@ -546,8 +658,9 @@ function createChannel() {
 
     sendTcpMessage('create_channel', {
         server_id: currentServer.id,
-        channel_name: name,
-        channel_type: type,
+        name: name,
+        type: type,
+        creator_id: currentUser.id,
         user_id: currentUser.id
     })
         .then(data => handleCreateChannelResponse(data))
@@ -697,6 +810,282 @@ function handleDeleteRoleResponse(data) {
     } else {
         alert('Error eliminando rol: ' + (data ? data.error : 'Error desconocido'));
     }
+}
+
+// ==================== MIEMBROS ====================
+
+function loadServerMembers() {
+    if (!currentServer) return;
+
+    sendTcpMessage('get_server_members', { server_id: currentServer.id })
+        .then(data => handleMembersResponse(data))
+        .catch(err => console.error('Error cargando miembros:', err));
+}
+
+function handleMembersResponse(data) {
+    resolveResponse(data);
+
+    if (!data || !data.success) {
+        console.error('Error obteniendo miembros');
+        return;
+    }
+
+    const members = data.members || [];
+    renderMembersList(members);
+}
+
+function renderMembersList(members) {
+    const container = document.getElementById('members-list');
+    container.innerHTML = '';
+
+    if (members.length === 0) {
+        container.innerHTML = '<div class="no-members">Sin miembros</div>';
+        return;
+    }
+
+    members.forEach(memberInfo => {
+        const user = memberInfo.user || {};
+        const roles = memberInfo.roles || [];
+
+        const div = document.createElement('div');
+        div.className = 'member-item';
+
+        const statusColor = {
+            'online': '#43B581',
+            'offline': '#747F8D',
+            'idle': '#FAA61A',
+            'dnd': '#F04747'
+        }[user.status] || '#747F8D';
+
+        const roleColor = roles.length > 0 ? (roles[0].color || '#99AAB5') : '#99AAB5';
+
+        div.innerHTML = `
+            <div class="member-avatar" style="background:${roleColor}">${(user.username || 'U').substring(0, 2).toUpperCase()}</div>
+            <span class="member-name" style="color:${roleColor}">${escapeHtml(user.username || 'Usuario')}</span>
+            <span class="member-status" style="background:${statusColor}"></span>
+        `;
+        container.appendChild(div);
+    });
+}
+
+// ==================== INVITACIONES ====================
+
+function showInviteModal() {
+    if (!currentServer) return;
+    loadInvites();
+    openModal('invite-modal');
+}
+
+function loadInvites() {
+    sendTcpMessage('get_server_invites', {
+        server_id: currentServer.id,
+        user_id: currentUser.id
+    })
+        .then(data => renderInvites(data))
+        .catch(err => console.error('Error cargando invitaciones:', err));
+}
+
+function renderInvites(data) {
+    const container = document.getElementById('invites-list');
+    container.innerHTML = '';
+
+    if (!data || !data.success) return;
+
+    const invites = data.invites || [];
+
+    if (invites.length === 0) {
+        container.innerHTML = '<div class="no-invites">No hay invitaciones activas</div>';
+        return;
+    }
+
+    invites.forEach(invite => {
+        const div = document.createElement('div');
+        div.className = 'invite-item';
+        div.innerHTML = `
+            <span class="invite-code">${invite.code}</span>
+            <span class="invite-info">Usos: ${invite.uses || 0}/${invite.max_uses || '∞'}</span>
+            <button class="btn btn-sm" onclick="copyInviteCode('${invite.code}')" title="Copiar">📋</button>
+            <button class="btn btn-sm btn-danger" onclick="revokeInvite('${invite.id}')" title="Revocar">✕</button>
+        `;
+        container.appendChild(div);
+    });
+}
+
+function createInvite() {
+    const maxUses = document.getElementById('invite-max-uses').value || null;
+    const expires = document.getElementById('invite-expires').value || null;
+
+    sendTcpMessage('create_invite', {
+        server_id: currentServer.id,
+        user_id: currentUser.id,
+        max_uses: maxUses ? parseInt(maxUses) : null,
+        expires_in_hours: expires ? parseInt(expires) : null
+    })
+        .then(data => {
+            if (data && data.success) {
+                loadInvites();
+                document.getElementById('invite-max-uses').value = '';
+                document.getElementById('invite-expires').value = '';
+            }
+        })
+        .catch(err => console.error('Error creando invitacion:', err));
+}
+
+function revokeInvite(inviteId) {
+    sendTcpMessage('revoke_invite', {
+        invite_id: inviteId,
+        user_id: currentUser.id
+    })
+        .then(data => {
+            if (data && data.success) loadInvites();
+        })
+        .catch(err => console.error('Error revocando invitacion:', err));
+}
+
+function copyInviteCode(code) {
+    navigator.clipboard.writeText(code).then(() => {
+        alert('Codigo copiado: ' + code);
+    });
+}
+
+function showJoinServer() {
+    openModal('join-server-modal');
+}
+
+function acceptInvite() {
+    const code = document.getElementById('invite-code').value.trim().toUpperCase();
+    if (!code) return;
+
+    sendTcpMessage('accept_invite', {
+        user_id: currentUser.id,
+        code: code
+    })
+        .then(data => {
+            if (data && data.success) {
+                closeModal('join-server-modal');
+                document.getElementById('invite-code').value = '';
+                loadUserServers();
+            } else {
+                alert('Error: ' + (data ? data.error : 'Codigo invalido'));
+            }
+        })
+        .catch(err => console.error('Error aceptando invitacion:', err));
+}
+
+// ==================== ARCHIVOS ====================
+
+function handleFileUpload(event) {
+    if (!currentChannel || !currentUser) return;
+
+    const file = event.target.files[0];
+    if (!file) return;
+
+    if (file.size > 10 * 1024 * 1024) {
+        alert('El archivo es demasiado grande (maximo 10MB)');
+        return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = function (e) {
+        const base64 = e.target.result.split(',')[1];
+
+        sendTcpMessage('upload_file', {
+            file_data: base64,
+            filename: file.name,
+            channel_id: currentChannel.id,
+            user_id: currentUser.id
+        })
+            .then(data => {
+                if (!data || !data.success) {
+                    alert('Error subiendo archivo: ' + (data ? data.error : 'Error'));
+                }
+            })
+            .catch(err => console.error('Error subiendo archivo:', err));
+    };
+    reader.readAsDataURL(file);
+
+    event.target.value = '';
+}
+
+function downloadFile(downloadUrl, filename) {
+    sendTcpMessage('download_file', {
+        download_url: downloadUrl,
+        filename: filename,
+        user_id: currentUser.id
+    })
+        .then(data => {
+            if (data && data.success && data.file_data) {
+                const byteChars = atob(data.file_data);
+                const byteArray = new Uint8Array(byteChars.length);
+                for (let i = 0; i < byteChars.length; i++) {
+                    byteArray[i] = byteChars.charCodeAt(i);
+                }
+                const blob = new Blob([byteArray]);
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = filename;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+            } else {
+                alert('Error descargando archivo: ' + (data ? data.error : 'Error'));
+            }
+        })
+        .catch(err => console.error('Error descargando archivo:', err));
+}
+
+// ==================== LLAMADAS ====================
+
+function startVoiceCall() {
+    if (!currentChannel || !currentUser) return;
+    sendTcpMessage('start_call', {
+        channel_id: currentChannel.id,
+        user_id: currentUser.id,
+        call_type: 'voice'
+    });
+    document.getElementById('end-call-btn').style.display = 'inline-block';
+    document.getElementById('voice-call-btn').disabled = true;
+    document.getElementById('video-call-btn').disabled = true;
+}
+
+function startVideoCall() {
+    if (!currentChannel || !currentUser) return;
+    sendTcpMessage('start_call', {
+        channel_id: currentChannel.id,
+        user_id: currentUser.id,
+        call_type: 'video'
+    });
+    sendTcpMessage('join_call', {
+        channel_id: currentChannel.id,
+        user_id: currentUser.id
+    });
+    document.getElementById('end-call-btn').style.display = 'inline-block';
+    document.getElementById('voice-call-btn').disabled = true;
+    document.getElementById('video-call-btn').disabled = true;
+}
+
+function startScreenShare() {
+    if (!currentChannel || !currentUser) return;
+    sendTcpMessage('screen_share_start', {
+        channel_id: currentChannel.id,
+        user_id: currentUser.id
+    });
+    document.getElementById('end-call-btn').style.display = 'inline-block';
+    document.getElementById('screen-share-btn').disabled = true;
+}
+
+function endCall() {
+    if (!currentChannel || !currentUser) return;
+    sendTcpMessage('leave_call', {
+        channel_id: currentChannel.id,
+        user_id: currentUser.id
+    });
+    document.getElementById('end-call-btn').style.display = 'none';
+    document.getElementById('voice-call-btn').disabled = false;
+    document.getElementById('video-call-btn').disabled = false;
+    document.getElementById('screen-share-btn').disabled = false;
 }
 
 // ==================== UTILIDADES ====================

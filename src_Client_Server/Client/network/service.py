@@ -115,10 +115,22 @@ class TCPClient(NetworkService):
             self.socket = None
     
     def _receive_messages(self):
-        """Recibe mensajes del servidor"""
+        """Recibe mensajes del servidor con protocolo de longitud prefijada"""
         while self.running and self.socket:
             try:
-                data = self.socket.recv(4096)
+                # Leer los 4 bytes de longitud
+                header = self._recv_exact(4)
+                if not header:
+                    break
+                
+                msg_length = int.from_bytes(header, 'big')
+                
+                if msg_length > 10 * 1024 * 1024:
+                    print(f"Mensaje demasiado grande: {msg_length} bytes")
+                    break
+                
+                # Leer el mensaje completo
+                data = self._recv_exact(msg_length)
                 if not data:
                     break
                 
@@ -133,13 +145,25 @@ class TCPClient(NetworkService):
         self.connected = False
         self._notify_callbacks('disconnected', {})
     
+    def _recv_exact(self, num_bytes: int) -> bytes:
+        """Lee exactamente num_bytes del socket"""
+        data = b''
+        while len(data) < num_bytes:
+            chunk = self.socket.recv(num_bytes - len(data))
+            if not chunk:
+                return b''
+            data += chunk
+        return data
+    
     def send(self, message: NetworkMessage) -> bool:
-        """Envía un mensaje al servidor"""
+        """Envia un mensaje al servidor con longitud prefijada"""
         if not self.connected or not self.socket:
             return False
         try:
-            logger.info(f"Mensaje a enviar: {message.to_json}")
-            self.socket.send(message.to_json().encode())
+            msg_bytes = message.to_json().encode()
+            # Prefijar con 4 bytes de longitud (big-endian)
+            length_header = len(msg_bytes).to_bytes(4, 'big')
+            self.socket.sendall(length_header + msg_bytes)
             return True
         except Exception as e:
             print(f"Error sending message: {e}")

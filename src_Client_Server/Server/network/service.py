@@ -178,11 +178,24 @@ class TCPServer(NetworkService):
                     print(f"Error accepting connection: {e}")
     
     def _handle_client(self, client_socket: socket.socket, client_id: str):
-        """Maneja un cliente"""
+        """Maneja un cliente con protocolo de longitud prefijada"""
         try:
             while self.running:
                 try:
-                    data = client_socket.recv(4096)
+                    # Leer primero los 4 bytes de longitud
+                    header = self._recv_exact(client_socket, 4)
+                    if not header:
+                        break
+                    
+                    msg_length = int.from_bytes(header, 'big')
+                    
+                    # Limitar tamaño máximo de mensaje (10MB)
+                    if msg_length > 10 * 1024 * 1024:
+                        print(f"Mensaje demasiado grande de {client_id}: {msg_length} bytes")
+                        break
+                    
+                    # Leer el mensaje completo
+                    data = self._recv_exact(client_socket, msg_length)
                     if not data:
                         break
                     
@@ -201,6 +214,16 @@ class TCPServer(NetworkService):
             except:
                 pass
             self._notify_callbacks('client_disconnected', {'client_id': client_id})
+    
+    def _recv_exact(self, sock: socket.socket, num_bytes: int) -> bytes:
+        """Lee exactamente num_bytes del socket"""
+        data = b''
+        while len(data) < num_bytes:
+            chunk = sock.recv(num_bytes - len(data))
+            if not chunk:
+                return b''
+            data += chunk
+        return data
     
     def _process_messages(self):
         """Procesa mensajes de la cola y los enruta a handlers específicos"""
@@ -265,6 +288,40 @@ class TCPServer(NetworkService):
                 self._handle_check_permission(client_id, message, repo_factory)
             elif message.type == "send_message":
                 self._handle_send_message(client_id, message, repo_factory)
+            elif message.type == "get_server_members":
+                self._handle_get_server_members(client_id, message, repo_factory)
+            elif message.type == "create_invite":
+                self._handle_create_invite(client_id, message, repo_factory)
+            elif message.type == "accept_invite":
+                self._handle_accept_invite(client_id, message, repo_factory)
+            elif message.type == "get_server_invites":
+                self._handle_get_server_invites(client_id, message, repo_factory)
+            elif message.type == "revoke_invite":
+                self._handle_revoke_invite(client_id, message, repo_factory)
+            elif message.type == "upload_file":
+                self._handle_upload_file(client_id, message, repo_factory)
+            elif message.type == "download_file":
+                self._handle_download_file(client_id, message, repo_factory)
+            elif message.type == "assign_role":
+                self._handle_assign_role(client_id, message, repo_factory)
+            elif message.type == "remove_role":
+                self._handle_remove_role(client_id, message, repo_factory)
+            elif message.type == "video_frame":
+                self._handle_video_frame(client_id, message, repo_factory)
+            elif message.type == "start_call":
+                self._handle_start_call(client_id, message, repo_factory)
+            elif message.type == "join_call":
+                self._handle_join_call(client_id, message, repo_factory)
+            elif message.type == "leave_call":
+                self._handle_leave_call(client_id, message, repo_factory)
+            elif message.type == "screen_share_start":
+                self._handle_screen_share_start(client_id, message, repo_factory)
+            elif message.type == "screen_share_stop":
+                self._handle_screen_share_stop(client_id, message, repo_factory)
+            elif message.type == "screen_frame":
+                self._handle_screen_frame(client_id, message, repo_factory)
+            elif message.type == "audio_frame":
+                self._handle_audio_frame(client_id, message, repo_factory)
             else:
                 print(f"Error handling message type {message.type}")
 
@@ -419,13 +476,15 @@ class TCPServer(NetworkService):
             message_service = MessageService(repo_factory)
 
             channel_id = message.data.get("channel_id")
+            limit = message.data.get("limit", 10)
+            before = message.data.get("before")
+            
+            # Limitar a máximo 30 mensajes por petición
+            limit = min(limit, 30)
 
-            logger.info(f"Solicitando mensajes para el canal: {channel_id}")
+            logger.info(f"Solicitando mensajes para el canal: {channel_id}, limit: {limit}, before: {before}")
 
-            messages = message_service.get_channel_messages(channel_id)
-            # Cambiamos la validación: 
-            # Si 'messages' es None, podrías considerar que el canal no existe.
-            # Si 'messages' es una lista (aunque sea []), es un éxito.
+            messages = message_service.get_channel_messages(channel_id, limit=limit, before=before)
             if messages is not None:
                 channels_messages_data = [
                     _serialize_for_json(m.dict()) if hasattr(m, 'dict') else _serialize_for_json(m) 
@@ -434,7 +493,11 @@ class TCPServer(NetworkService):
                 
                 response = NetworkMessage(
                     type="get_channel_messages_response",
-                    data={"success": True, "messages": channels_messages_data},
+                    data={
+                        "success": True,
+                        "messages": channels_messages_data,
+                        "has_more": len(channels_messages_data) >= limit
+                    },
                     sender_id="server"
                 )
             else:
@@ -462,14 +525,25 @@ class TCPServer(NetworkService):
         """Maneja solicitud de crear canal"""
         try:
             from src_Client_Server.Server.services.server_service import ServerService
+            from src_Client_Server.Server.models.enums import ChannelType
             server_service = ServerService(repo_factory)
             
             server_id = message.data.get("server_id")
-            channel_name = message.data.get("channel_name")
-            user_id = message.data.get("user_id")
+            # Soportar ambos nombres de campo (channel_name o name)
+            channel_name = message.data.get("channel_name") or message.data.get("name")
+            user_id = message.data.get("user_id") or message.data.get("creator_id")
+            channel_type = message.data.get("type", "text")
+            
+            # Convertir tipo de canal a enum si es string
+            if isinstance(channel_type, str):
+                channel_type = ChannelType(channel_type)
             
             success, error, channel = server_service.create_channel(
-                server_id, channel_name, user_id
+                server_id, user_id,
+                name=channel_name,
+                type=channel_type,
+                topic=message.data.get("topic"),
+                is_private=message.data.get("is_private", False)
             )
             
             if success:
@@ -576,10 +650,25 @@ class TCPServer(NetworkService):
         """Maneja enviar mensajes a un canal"""
         try:
             from src_Client_Server.Server.services.message_service import MessageService
+            from src_Client_Server.Server.services.permission_service import PermissionService
             from src_Client_Server.Server.repositories import RepositoryFactory
             message_service = MessageService(repo_factory)
+            permission_service = PermissionService()
 
             logger.info(f"Creando mensaje de : {client_id}")
+
+            # Verificar permisos de envío
+            channel_id = message.data.get('channel_id')
+            author_id = message.data.get('author_id')
+            
+            if not permission_service.can_send_message(author_id, channel_id):
+                response = NetworkMessage(
+                    type="send_message_response",
+                    data={"success": False, "error": "No tienes permisos para enviar mensajes en este canal"},
+                    sender_id="server"
+                )
+                self.send(client_id, response)
+                return
 
             # ERROR CORREGIDO: Usamos message.data que es el diccionario
             success, error, created_message = message_service.send_message(**message.data)
@@ -983,12 +1072,651 @@ class TCPServer(NetworkService):
             self.send(client_id, response)
             logger.info(f"Mensaje de respuesta a {client_id} , response: {response}")
     
+    def _handle_get_server_members(self, client_id: str, message: NetworkMessage, repo_factory):
+        """Obtiene los miembros de un servidor con su información de usuario y roles"""
+        try:
+            from src_Client_Server.Server.services.server_service import ServerService
+            server_service = ServerService(repo_factory)
+            
+            server_id = message.data.get("server_id")
+            members_data = server_service.get_server_members(server_id)
+            
+            serialized_members = []
+            for m in members_data:
+                serialized_members.append(_serialize_for_json(m))
+            
+            response = NetworkMessage(
+                type="get_server_members_response",
+                data={"success": True, "members": serialized_members},
+                sender_id="server"
+            )
+            self.send(client_id, response)
+            logger.info(f"Miembros enviados a {client_id}: {len(serialized_members)} miembros")
+        except Exception as e:
+            response = NetworkMessage(
+                type="get_server_members_response",
+                data={"success": False, "error": str(e)},
+                sender_id="server"
+            )
+            self.send(client_id, response)
+            logger.error(f"Error en _handle_get_server_members: {e}")
+
+    def _handle_create_invite(self, client_id: str, message: NetworkMessage, repo_factory):
+        """Crea un codigo de invitacion para un servidor"""
+        try:
+            from src_Client_Server.Server.services.invite_service import InviteService
+            from src_Client_Server.Server.services.server_service import ServerService
+            
+            server_service = ServerService(repo_factory)
+            invite_service = InviteService(repo_factory)
+            
+            server_id = message.data.get("server_id")
+            user_id = message.data.get("user_id")
+            max_uses = message.data.get("max_uses")
+            expires_in_hours = message.data.get("expires_in_hours")
+            
+            server = server_service.get_server(server_id)
+            if not server:
+                response = NetworkMessage(
+                    type="create_invite_response",
+                    data={"success": False, "error": "Servidor no encontrado"},
+                    sender_id="server"
+                )
+                self.send(client_id, response)
+                return
+            
+            success, error, invite = invite_service.create_invite(
+                server_id, user_id, max_uses, expires_in_hours
+            )
+            
+            if success:
+                invite_data = _serialize_for_json(invite.to_dict() if hasattr(invite, 'to_dict') else invite.dict())
+                response = NetworkMessage(
+                    type="create_invite_response",
+                    data={"success": True, "invite": invite_data},
+                    sender_id="server"
+                )
+            else:
+                response = NetworkMessage(
+                    type="create_invite_response",
+                    data={"success": False, "error": error},
+                    sender_id="server"
+                )
+            self.send(client_id, response)
+        except Exception as e:
+            response = NetworkMessage(
+                type="create_invite_response",
+                data={"success": False, "error": str(e)},
+                sender_id="server"
+            )
+            self.send(client_id, response)
+
+    def _handle_accept_invite(self, client_id: str, message: NetworkMessage, repo_factory):
+        """Acepta un codigo de invitacion y une al usuario al servidor"""
+        try:
+            from src_Client_Server.Server.services.invite_service import InviteService
+            invite_service = InviteService(repo_factory)
+            
+            user_id = message.data.get("user_id")
+            code = message.data.get("code")
+            
+            success, error, server_data = invite_service.accept_invite(user_id, code)
+            
+            if success:
+                serialized_server = _serialize_for_json(server_data)
+                response = NetworkMessage(
+                    type="accept_invite_response",
+                    data={"success": True, "server": serialized_server},
+                    sender_id="server"
+                )
+            else:
+                response = NetworkMessage(
+                    type="accept_invite_response",
+                    data={"success": False, "error": error},
+                    sender_id="server"
+                )
+            self.send(client_id, response)
+        except Exception as e:
+            response = NetworkMessage(
+                type="accept_invite_response",
+                data={"success": False, "error": str(e)},
+                sender_id="server"
+            )
+            self.send(client_id, response)
+
+    def _handle_get_server_invites(self, client_id: str, message: NetworkMessage, repo_factory):
+        """Obtiene las invitaciones de un servidor"""
+        try:
+            from src_Client_Server.Server.services.invite_service import InviteService
+            invite_service = InviteService(repo_factory)
+            
+            server_id = message.data.get("server_id")
+            user_id = message.data.get("user_id")
+            
+            invites = invite_service.get_server_invites(server_id, user_id)
+            invites_data = [_serialize_for_json(i.to_dict() if hasattr(i, 'to_dict') else i.dict()) for i in invites]
+            
+            response = NetworkMessage(
+                type="get_server_invites_response",
+                data={"success": True, "invites": invites_data},
+                sender_id="server"
+            )
+            self.send(client_id, response)
+        except Exception as e:
+            response = NetworkMessage(
+                type="get_server_invites_response",
+                data={"success": False, "error": str(e)},
+                sender_id="server"
+            )
+            self.send(client_id, response)
+
+    def _handle_revoke_invite(self, client_id: str, message: NetworkMessage, repo_factory):
+        """Revoca una invitacion"""
+        try:
+            from src_Client_Server.Server.services.invite_service import InviteService
+            invite_service = InviteService(repo_factory)
+            
+            invite_id = message.data.get("invite_id")
+            user_id = message.data.get("user_id")
+            
+            success, error = invite_service.revoke_invite(invite_id, user_id)
+            
+            response = NetworkMessage(
+                type="revoke_invite_response",
+                data={"success": success, "error": error or ""},
+                sender_id="server"
+            )
+            self.send(client_id, response)
+        except Exception as e:
+            response = NetworkMessage(
+                type="revoke_invite_response",
+                data={"success": False, "error": str(e)},
+                sender_id="server"
+            )
+            self.send(client_id, response)
+
+    def _handle_upload_file(self, client_id: str, message: NetworkMessage, repo_factory):
+        """Maneja la subida de un archivo"""
+        try:
+            import os
+            import base64
+            import hashlib
+            import uuid
+            import mimetypes
+            
+            file_data_b64 = message.data.get("file_data")
+            filename = message.data.get("filename")
+            channel_id = message.data.get("channel_id")
+            user_id = message.data.get("user_id")
+            
+            if not file_data_b64 or not filename:
+                response = NetworkMessage(
+                    type="upload_file_response",
+                    data={"success": False, "error": "Datos de archivo incompletos"},
+                    sender_id="server"
+                )
+                self.send(client_id, response)
+                return
+            
+            file_bytes = base64.b64decode(file_data_b64)
+            file_hash = hashlib.sha256(file_bytes).hexdigest()
+            file_size = len(file_bytes)
+            mime_type, _ = mimetypes.guess_type(filename)
+            file_type = mime_type or 'application/octet-stream'
+            
+            upload_dir = os.path.join("data", "uploads")
+            os.makedirs(upload_dir, exist_ok=True)
+            
+            file_id = str(uuid.uuid4())
+            ext = os.path.splitext(filename)[1]
+            safe_filename = f"{file_id}{ext}"
+            filepath = os.path.join(upload_dir, safe_filename)
+            
+            with open(filepath, 'wb') as f:
+                f.write(file_bytes)
+            
+            file_transfer_repo = repo_factory.get_repository('file_transfers')
+            total_chunks = 1
+            transfer_data = {
+                'channel_id': channel_id,
+                'sender_id': user_id,
+                'filename': filename,
+                'file_size': file_size,
+                'file_type': file_type,
+                'file_hash': file_hash,
+                'encrypted': False,
+                'chunk_size': file_size,
+                'total_chunks': total_chunks,
+                'uploaded_chunks': total_chunks,
+                'download_url': safe_filename
+            }
+            transfer_id = file_transfer_repo.create(transfer_data)
+            
+            from src_Client_Server.Server.services.message_service import MessageService
+            from src_Client_Server.Server.models.enums import MessageType
+            message_service = MessageService(repo_factory)
+            
+            attachment_data = {
+                'transfer_id': transfer_id,
+                'filename': filename,
+                'file_size': file_size,
+                'file_type': file_type,
+                'file_hash': file_hash,
+                'download_url': safe_filename
+            }
+            
+            success, error, msg = message_service.send_message(
+                content=f"[Archivo] {filename}",
+                channel_id=channel_id,
+                author_id=user_id,
+                message_type=MessageType.FILE,
+                attachments=[attachment_data]
+            )
+            
+            response = NetworkMessage(
+                type="upload_file_response",
+                data={
+                    "success": True,
+                    "transfer_id": transfer_id,
+                    "filename": filename,
+                    "file_hash": file_hash,
+                    "download_url": safe_filename
+                },
+                sender_id="server"
+            )
+            self.send(client_id, response)
+            
+            if success and msg:
+                msg_dict = _serialize_for_json(msg.dict())
+                channel = message_service.channels_repo.get_by_id(channel_id)
+                if channel:
+                    broadcast_msg = NetworkMessage(
+                        type="message_broadcast",
+                        data={
+                            "message": msg_dict,
+                            "channel_id": channel_id,
+                            "server_id": channel.server_id
+                        },
+                        sender_id="server"
+                    )
+                    with self.lock:
+                        for connected_client_id in list(self.clients.keys()):
+                            if connected_client_id != client_id:
+                                try:
+                                    self.send(connected_client_id, broadcast_msg)
+                                except Exception:
+                                    pass
+            
+            logger.info(f"Archivo subido: {filename} ({file_size} bytes) por {user_id}")
+        except Exception as e:
+            response = NetworkMessage(
+                type="upload_file_response",
+                data={"success": False, "error": str(e)},
+                sender_id="server"
+            )
+            self.send(client_id, response)
+            logger.error(f"Error en _handle_upload_file: {e}")
+
+    def _handle_download_file(self, client_id: str, message: NetworkMessage, repo_factory):
+        """Maneja la descarga de un archivo"""
+        try:
+            import os
+            import base64
+            
+            download_url = message.data.get("download_url")
+            
+            if not download_url:
+                response = NetworkMessage(
+                    type="download_file_response",
+                    data={"success": False, "error": "URL de descarga no especificada"},
+                    sender_id="server"
+                )
+                self.send(client_id, response)
+                return
+            
+            filepath = os.path.join("data", "uploads", download_url)
+            
+            if not os.path.exists(filepath):
+                response = NetworkMessage(
+                    type="download_file_response",
+                    data={"success": False, "error": "Archivo no encontrado en el servidor"},
+                    sender_id="server"
+                )
+                self.send(client_id, response)
+                return
+            
+            with open(filepath, 'rb') as f:
+                file_bytes = f.read()
+            
+            file_data_b64 = base64.b64encode(file_bytes).decode()
+            
+            response = NetworkMessage(
+                type="download_file_response",
+                data={
+                    "success": True,
+                    "file_data": file_data_b64,
+                    "filename": message.data.get("filename", download_url)
+                },
+                sender_id="server"
+            )
+            self.send(client_id, response)
+            logger.info(f"Archivo descargado: {download_url} por {client_id}")
+        except Exception as e:
+            response = NetworkMessage(
+                type="download_file_response",
+                data={"success": False, "error": str(e)},
+                sender_id="server"
+            )
+            self.send(client_id, response)
+
+    def _handle_assign_role(self, client_id: str, message: NetworkMessage, repo_factory):
+        """Asigna un rol a un miembro del servidor"""
+        try:
+            from src_Client_Server.Server.services.server_service import ServerService
+            from src_Client_Server.Server.services.permission_service import PermissionService
+            from src_Client_Server.Server.models.enums import Permission
+            
+            server_service = ServerService(repo_factory)
+            permission_service = PermissionService()
+            
+            server_id = message.data.get("server_id")
+            user_id = message.data.get("user_id")
+            target_user_id = message.data.get("target_user_id")
+            role_id = message.data.get("role_id")
+            
+            server = server_service.get_server(server_id)
+            if not server:
+                response = NetworkMessage(
+                    type="assign_role_response",
+                    data={"success": False, "error": "Servidor no encontrado"},
+                    sender_id="server"
+                )
+                self.send(client_id, response)
+                return
+            
+            is_owner = server.owner_id == user_id
+            has_perm = is_owner or permission_service.has_permission(user_id, server_id, Permission.MANAGE_ROLES)
+            
+            if not has_perm:
+                response = NetworkMessage(
+                    type="assign_role_response",
+                    data={"success": False, "error": "Sin permisos para gestionar roles"},
+                    sender_id="server"
+                )
+                self.send(client_id, response)
+                return
+            
+            members_repo = repo_factory.get_repository('server_members')
+            member = members_repo.get_by_id(target_user_id, server_id)
+            if not member:
+                response = NetworkMessage(
+                    type="assign_role_response",
+                    data={"success": False, "error": "El usuario no es miembro del servidor"},
+                    sender_id="server"
+                )
+                self.send(client_id, response)
+                return
+            
+            if role_id not in member.role_ids:
+                member.role_ids.append(role_id)
+                members_repo.update(target_user_id, server_id, {'role_ids': member.role_ids})
+            
+            response = NetworkMessage(
+                type="assign_role_response",
+                data={"success": True},
+                sender_id="server"
+            )
+            self.send(client_id, response)
+            logger.info(f"Rol {role_id} asignado a usuario {target_user_id} en servidor {server_id}")
+        except Exception as e:
+            response = NetworkMessage(
+                type="assign_role_response",
+                data={"success": False, "error": str(e)},
+                sender_id="server"
+            )
+            self.send(client_id, response)
+
+    def _handle_remove_role(self, client_id: str, message: NetworkMessage, repo_factory):
+        """Remueve un rol de un miembro del servidor"""
+        try:
+            from src_Client_Server.Server.services.server_service import ServerService
+            from src_Client_Server.Server.services.permission_service import PermissionService
+            from src_Client_Server.Server.models.enums import Permission
+            
+            server_service = ServerService(repo_factory)
+            permission_service = PermissionService()
+            
+            server_id = message.data.get("server_id")
+            user_id = message.data.get("user_id")
+            target_user_id = message.data.get("target_user_id")
+            role_id = message.data.get("role_id")
+            
+            server = server_service.get_server(server_id)
+            if not server:
+                response = NetworkMessage(
+                    type="remove_role_response",
+                    data={"success": False, "error": "Servidor no encontrado"},
+                    sender_id="server"
+                )
+                self.send(client_id, response)
+                return
+            
+            is_owner = server.owner_id == user_id
+            has_perm = is_owner or permission_service.has_permission(user_id, server_id, Permission.MANAGE_ROLES)
+            
+            if not has_perm:
+                response = NetworkMessage(
+                    type="remove_role_response",
+                    data={"success": False, "error": "Sin permisos para gestionar roles"},
+                    sender_id="server"
+                )
+                self.send(client_id, response)
+                return
+            
+            members_repo = repo_factory.get_repository('server_members')
+            member = members_repo.get_by_id(target_user_id, server_id)
+            if not member:
+                response = NetworkMessage(
+                    type="remove_role_response",
+                    data={"success": False, "error": "El usuario no es miembro del servidor"},
+                    sender_id="server"
+                )
+                self.send(client_id, response)
+                return
+            
+            if role_id in member.role_ids:
+                member.role_ids.remove(role_id)
+                members_repo.update(target_user_id, server_id, {'role_ids': member.role_ids})
+            
+            response = NetworkMessage(
+                type="remove_role_response",
+                data={"success": True},
+                sender_id="server"
+            )
+            self.send(client_id, response)
+            logger.info(f"Rol {role_id} removido de usuario {target_user_id} en servidor {server_id}")
+        except Exception as e:
+            response = NetworkMessage(
+                type="remove_role_response",
+                data={"success": False, "error": str(e)},
+                sender_id="server"
+            )
+            self.send(client_id, response)
+
+    def _handle_video_frame(self, client_id: str, message: NetworkMessage, repo_factory):
+        """Reenvia frames de video a los clientes en el canal"""
+        try:
+            broadcast_msg = NetworkMessage(
+                type="video_frame_broadcast",
+                data=message.data,
+                sender_id=client_id
+            )
+            with self.lock:
+                for connected_client_id in list(self.clients.keys()):
+                    if connected_client_id != client_id:
+                        try:
+                            self.send(connected_client_id, broadcast_msg)
+                        except Exception:
+                            pass
+        except Exception as e:
+            logger.error(f"Error en _handle_video_frame: {e}")
+
+    def _handle_audio_frame(self, client_id: str, message: NetworkMessage, repo_factory):
+        """Reenvia frames de audio a los clientes en el canal"""
+        try:
+            broadcast_msg = NetworkMessage(
+                type="audio_frame_broadcast",
+                data=message.data,
+                sender_id=client_id
+            )
+            with self.lock:
+                for connected_client_id in list(self.clients.keys()):
+                    if connected_client_id != client_id:
+                        try:
+                            self.send(connected_client_id, broadcast_msg)
+                        except Exception:
+                            pass
+        except Exception as e:
+            logger.error(f"Error en _handle_audio_frame: {e}")
+
+    def _handle_start_call(self, client_id: str, message: NetworkMessage, repo_factory):
+        """Inicia una llamada de voz/video en un canal"""
+        try:
+            channel_id = message.data.get("channel_id")
+            user_id = message.data.get("user_id")
+            call_type = message.data.get("call_type", "voice")
+            
+            broadcast_msg = NetworkMessage(
+                type="call_started",
+                data={
+                    "channel_id": channel_id,
+                    "initiator_id": user_id,
+                    "call_type": call_type
+                },
+                sender_id="server"
+            )
+            with self.lock:
+                for connected_client_id in list(self.clients.keys()):
+                    try:
+                        self.send(connected_client_id, broadcast_msg)
+                    except Exception:
+                        pass
+            
+            logger.info(f"Llamada {call_type} iniciada en canal {channel_id} por {user_id}")
+        except Exception as e:
+            logger.error(f"Error en _handle_start_call: {e}")
+
+    def _handle_join_call(self, client_id: str, message: NetworkMessage, repo_factory):
+        """Un usuario se une a una llamada"""
+        try:
+            channel_id = message.data.get("channel_id")
+            user_id = message.data.get("user_id")
+            
+            broadcast_msg = NetworkMessage(
+                type="call_user_joined",
+                data={"channel_id": channel_id, "user_id": user_id},
+                sender_id="server"
+            )
+            with self.lock:
+                for connected_client_id in list(self.clients.keys()):
+                    if connected_client_id != client_id:
+                        try:
+                            self.send(connected_client_id, broadcast_msg)
+                        except Exception:
+                            pass
+        except Exception as e:
+            logger.error(f"Error en _handle_join_call: {e}")
+
+    def _handle_leave_call(self, client_id: str, message: NetworkMessage, repo_factory):
+        """Un usuario abandona una llamada"""
+        try:
+            channel_id = message.data.get("channel_id")
+            user_id = message.data.get("user_id")
+            
+            broadcast_msg = NetworkMessage(
+                type="call_user_left",
+                data={"channel_id": channel_id, "user_id": user_id},
+                sender_id="server"
+            )
+            with self.lock:
+                for connected_client_id in list(self.clients.keys()):
+                    if connected_client_id != client_id:
+                        try:
+                            self.send(connected_client_id, broadcast_msg)
+                        except Exception:
+                            pass
+        except Exception as e:
+            logger.error(f"Error en _handle_leave_call: {e}")
+
+    def _handle_screen_share_start(self, client_id: str, message: NetworkMessage, repo_factory):
+        """Inicia compartir pantalla"""
+        try:
+            channel_id = message.data.get("channel_id")
+            user_id = message.data.get("user_id")
+            
+            broadcast_msg = NetworkMessage(
+                type="screen_share_started",
+                data={"channel_id": channel_id, "user_id": user_id},
+                sender_id="server"
+            )
+            with self.lock:
+                for connected_client_id in list(self.clients.keys()):
+                    if connected_client_id != client_id:
+                        try:
+                            self.send(connected_client_id, broadcast_msg)
+                        except Exception:
+                            pass
+        except Exception as e:
+            logger.error(f"Error en _handle_screen_share_start: {e}")
+
+    def _handle_screen_share_stop(self, client_id: str, message: NetworkMessage, repo_factory):
+        """Detiene compartir pantalla"""
+        try:
+            channel_id = message.data.get("channel_id")
+            user_id = message.data.get("user_id")
+            
+            broadcast_msg = NetworkMessage(
+                type="screen_share_stopped",
+                data={"channel_id": channel_id, "user_id": user_id},
+                sender_id="server"
+            )
+            with self.lock:
+                for connected_client_id in list(self.clients.keys()):
+                    if connected_client_id != client_id:
+                        try:
+                            self.send(connected_client_id, broadcast_msg)
+                        except Exception:
+                            pass
+        except Exception as e:
+            logger.error(f"Error en _handle_screen_share_stop: {e}")
+
+    def _handle_screen_frame(self, client_id: str, message: NetworkMessage, repo_factory):
+        """Reenvia frames de pantalla compartida"""
+        try:
+            broadcast_msg = NetworkMessage(
+                type="screen_frame_broadcast",
+                data=message.data,
+                sender_id=client_id
+            )
+            with self.lock:
+                for connected_client_id in list(self.clients.keys()):
+                    if connected_client_id != client_id:
+                        try:
+                            self.send(connected_client_id, broadcast_msg)
+                        except Exception:
+                            pass
+        except Exception as e:
+            logger.error(f"Error en _handle_screen_frame: {e}")
+
     def send(self, target_id: str, message: NetworkMessage) -> bool:
-        """Envía un mensaje a un cliente específico"""
+        """Envia un mensaje a un cliente especifico con longitud prefijada"""
         with self.lock:
             if target_id in self.clients:
                 try:
-                    self.clients[target_id].send(message.to_json().encode())
+                    msg_bytes = message.to_json().encode()
+                    # Prefijar con 4 bytes de longitud (big-endian)
+                    length_header = len(msg_bytes).to_bytes(4, 'big')
+                    self.clients[target_id].sendall(length_header + msg_bytes)
                     return True
                 except Exception as e:
                     print(f"Error sending to {target_id}: {e}")
@@ -996,13 +1724,15 @@ class TCPServer(NetworkService):
         return False
     
     def broadcast(self, message: NetworkMessage, exclude: Optional[List[str]] = None):
-        """Envía un mensaje a todos los clientes"""
+        """Envia un mensaje a todos los clientes con longitud prefijada"""
         exclude = exclude or []
+        msg_bytes = message.to_json().encode()
+        length_header = len(msg_bytes).to_bytes(4, 'big')
         with self.lock:
             for client_id, client_socket in self.clients.items():
                 if client_id not in exclude:
                     try:
-                        client_socket.send(message.to_json().encode())
+                        client_socket.sendall(length_header + msg_bytes)
                     except Exception as e:
                         print(f"Error broadcasting to {client_id}: {e}")
     

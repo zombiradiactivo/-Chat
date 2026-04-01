@@ -6,6 +6,9 @@ from typing import Optional, Callable, Dict, Any
 from PIL import Image, ImageTk
 import threading
 import time
+import os
+import base64
+import io
 
 from src_Client_Server.Client.models.user import User, UserStatus
 from src_Client_Server.Client.models.server import Server
@@ -19,6 +22,7 @@ from src_Client_Server.Client.ui.create_server_modal import CreateServerModal
 from src_Client_Server.Client.ui.create_channel_modal import CreateChannelModal
 from src_Client_Server.Client.ui.server_settings_modal import ServerSettingsModal
 from src_Client_Server.Client.ui.manage_roles_modal import ManageRolesModal
+from src_Client_Server.Client.ui.invite_modal import InviteModal, AcceptInviteDialog
 from src_Client_Server.Client.utils.logger import setup_logger
 from src_Client_Server.Client.network.service import TCPClient, NetworkMessage
 
@@ -60,6 +64,16 @@ class MainWindow(ctk.CTk):
         self.channels: list = []
         self.messages: list = []
         
+        # Estado de llamadas
+        self.in_call = False
+        self.call_type = None  # "voice", "video"
+        self.screen_sharing = False
+        
+        # Paginación de mensajes
+        self.messages_has_more = False
+        self.loading_more_messages = False
+        self.all_messages = []  # Todos los mensajes cargados
+        
         # Configurar apariencia
         ctk.set_appearance_mode("dark")
         ctk.set_default_color_theme("blue")
@@ -98,7 +112,21 @@ class MainWindow(ctk.CTk):
             hover_color=("gray85", "gray35"),
             font=ctk.CTkFont(size=20)
         )
-        self.add_server_btn.pack(pady=(0, 10))
+        self.add_server_btn.pack(pady=(0, 5))
+        
+        # Botón para unirse a servidor
+        self.join_server_btn = ctk.CTkButton(
+            self.server_buttons_frame,
+            text="🔗",
+            width=32,
+            height=32,
+            corner_radius=8,
+            command=self._on_join_server,
+            fg_color=("gray75", "gray25"),
+            hover_color=("gray85", "gray35"),
+            font=ctk.CTkFont(size=16)
+        )
+        self.join_server_btn.pack(pady=(0, 10))
         
         # Separador
         separator = ctk.CTkFrame(self, width=2, fg_color=("red", "red"))
@@ -148,7 +176,20 @@ class MainWindow(ctk.CTk):
             command=self._on_manage_roles,
             state="disabled"
         )
-        self.roles_btn.grid(row=0, column=2, padx=(5, 10), pady=15)
+        self.roles_btn.grid(row=0, column=2, padx=(5, 5), pady=15)
+        
+        # Botón de invitación
+        self.invite_btn = ctk.CTkButton(
+            self.server_header,
+            text="🔗",
+            width=30,
+            height=30,
+            fg_color="transparent",
+            hover_color=("gray75", "gray35"),
+            command=self._on_invite,
+            state="disabled"
+        )
+        self.invite_btn.grid(row=0, column=3, padx=(5, 10), pady=15)
         
         # Lista de canales
         self.channels_frame = ctk.CTkScrollableFrame(self.channel_panel)
@@ -179,13 +220,66 @@ class MainWindow(ctk.CTk):
         # Header del canal
         self.channel_header = ctk.CTkFrame(self.chat_panel, height=60, fg_color=("gray85", "gray20"))
         self.channel_header.grid(row=0, column=0, sticky="ew")
+        self.channel_header.grid_columnconfigure(1, weight=1)
         
         self.channel_title = ctk.CTkLabel(
             self.channel_header,
             text="Selecciona un canal",
             font=ctk.CTkFont(size=16, weight="bold")
         )
-        self.channel_title.pack(side="left", padx=20, pady=15)
+        self.channel_title.grid(row=0, column=0, padx=20, pady=15, sticky="w")
+        
+        # Botones de llamada
+        self.call_controls_frame = ctk.CTkFrame(self.channel_header, fg_color="transparent")
+        self.call_controls_frame.grid(row=0, column=2, padx=10, pady=10, sticky="e")
+        
+        self.voice_call_btn = ctk.CTkButton(
+            self.call_controls_frame,
+            text="📞",
+            width=35,
+            height=35,
+            fg_color="transparent",
+            hover_color=("gray75", "gray35"),
+            command=self._on_start_voice_call,
+            state="disabled"
+        )
+        self.voice_call_btn.pack(side="left", padx=2)
+        
+        self.video_call_btn = ctk.CTkButton(
+            self.call_controls_frame,
+            text="📹",
+            width=35,
+            height=35,
+            fg_color="transparent",
+            hover_color=("gray75", "gray35"),
+            command=self._on_start_video_call,
+            state="disabled"
+        )
+        self.video_call_btn.pack(side="left", padx=2)
+        
+        self.screen_share_btn = ctk.CTkButton(
+            self.call_controls_frame,
+            text="🖥️",
+            width=35,
+            height=35,
+            fg_color="transparent",
+            hover_color=("gray75", "gray35"),
+            command=self._on_screen_share,
+            state="disabled"
+        )
+        self.screen_share_btn.pack(side="left", padx=2)
+        
+        self.end_call_btn = ctk.CTkButton(
+            self.call_controls_frame,
+            text="🔴",
+            width=35,
+            height=35,
+            fg_color=("#F04747", "#F04747"),
+            hover_color=("#D83C3C", "#D83C3C"),
+            command=self._on_end_call,
+            state="disabled"
+        )
+        self.end_call_btn.pack(side="left", padx=2)
         
         # Mensajes
         self.messages_frame = ScrollableFrame(self.chat_panel)
@@ -194,14 +288,27 @@ class MainWindow(ctk.CTk):
         # Input de mensaje
         self.message_input_frame = ctk.CTkFrame(self.chat_panel, fg_color=("gray90", "gray15"))
         self.message_input_frame.grid(row=2, column=0, sticky="ew", padx=10, pady=10)
-        self.message_input_frame.grid_columnconfigure(0, weight=1)
+        self.message_input_frame.grid_columnconfigure(1, weight=1)
+        
+        # Botón de adjuntar archivo
+        self.attach_btn = ctk.CTkButton(
+            self.message_input_frame,
+            text="+",
+            width=40,
+            height=40,
+            font=ctk.CTkFont(size=20),
+            fg_color="transparent",
+            hover_color=("gray75", "gray35"),
+            command=self._on_attach_file
+        )
+        self.attach_btn.grid(row=0, column=0, padx=(10, 0), pady=10)
         
         self.message_entry = ctk.CTkEntry(
             self.message_input_frame,
             placeholder_text="Escribe un mensaje...",
             height=40
         )
-        self.message_entry.grid(row=0, column=0, padx=(10, 10), pady=10, sticky="ew")
+        self.message_entry.grid(row=0, column=1, padx=(10, 10), pady=10, sticky="ew")
         self.message_entry.bind("<Return>", lambda e: self._send_message())
         
         self.send_button = ctk.CTkButton(
@@ -211,7 +318,7 @@ class MainWindow(ctk.CTk):
             height=40,
             command=self._send_message
         )
-        self.send_button.grid(row=0, column=1, padx=(0, 10), pady=10)
+        self.send_button.grid(row=0, column=2, padx=(0, 5), pady=10)
         
         # Separador
         separator3 = ctk.CTkFrame(self, width=2, fg_color=("gray70", "gray30"))
@@ -281,11 +388,32 @@ class MainWindow(ctk.CTk):
                             "create_role_response", "update_role_response",
                             "delete_role_response", "reorder_roles_response",
                             "check_permission_response", "create_server_response",
-                            "get_channel_messages_response", "send_message_response"]:
+                            "get_channel_messages_response", "send_message_response",
+                            "get_server_members_response", "create_invite_response",
+                            "accept_invite_response", "get_server_invites_response",
+                            "revoke_invite_response", "upload_file_response",
+                            "download_file_response", "assign_role_response",
+                            "remove_role_response"]:
             
-            logger.info(f" MESSAGE DATA DE message_broadcast: {message.data}")
+            logger.info(f" MESSAGE DATA: {message.data}")
             self.response_data = message.data
             self.response_event.set()
+        
+        # Manejar broadcasts de llamadas/video/audio
+        elif message.type == "call_started":
+            self.after(0, lambda: self._handle_call_started(message.data))
+        elif message.type == "call_user_joined":
+            self.after(0, lambda: self._handle_call_user_joined(message.data))
+        elif message.type == "call_user_left":
+            self.after(0, lambda: self._handle_call_user_left(message.data))
+        elif message.type == "video_frame_broadcast":
+            self._handle_video_frame(message.data)
+        elif message.type == "audio_frame_broadcast":
+            self._handle_audio_frame(message.data)
+        elif message.type == "screen_share_started":
+            self.after(0, lambda: self._handle_screen_share_started(message.data))
+        elif message.type == "screen_share_stopped":
+            self.after(0, lambda: self._handle_screen_share_stopped(message.data))
     
     def _handle_message_broadcast(self, data):
         """Maneja mensajes de broadcast (mensajes recibidos de otros usuarios)"""
@@ -498,11 +626,13 @@ class MainWindow(ctk.CTk):
             
             self.settings_btn.configure(state="normal" if can_manage_server else "disabled")
             self.roles_btn.configure(state="normal" if can_manage_roles else "disabled")
+            self.invite_btn.configure(state="normal")
         else:
             self.server_title.configure(text="Selecciona un servidor")
             self.add_channel_btn.configure(state="disabled")
             self.settings_btn.configure(state="disabled")
             self.roles_btn.configure(state="disabled")
+            self.invite_btn.configure(state="disabled")
     
     def _load_server_channels(self):
         """Carga los canales del servidor actual"""
@@ -587,57 +717,239 @@ class MainWindow(ctk.CTk):
         """Selecciona un canal"""
         self.current_channel = Channel(**channel)
         logger.info(self.current_channel)
-        # self.channel_title.configure(**Channel)
+        
+        # Actualizar título del canal
+        self.channel_title.configure(text=f"# {channel['name']}")
+        
+        # Habilitar botones de llamada según tipo de canal
+        channel_type = channel.get('type', 'text')
+        if channel_type == 'voice':
+            self.voice_call_btn.configure(state="normal")
+            self.video_call_btn.configure(state="disabled")
+            self.screen_share_btn.configure(state="normal")
+        elif channel_type == 'video':
+            self.voice_call_btn.configure(state="normal")
+            self.video_call_btn.configure(state="normal")
+            self.screen_share_btn.configure(state="normal")
+        else:
+            self.voice_call_btn.configure(state="disabled")
+            self.video_call_btn.configure(state="disabled")
+            self.screen_share_btn.configure(state="disabled")
+        
         self._load_channel_messages()
     
     def _load_channel_messages(self):
-        """Carga los mensajes del canal actual"""
+        """Carga los mensajes iniciales del canal actual (10 más recientes)"""
         if not self.current_channel:
             return
         
-        # Limpiar mensajes
+        # Limpiar mensajes y resetear estado
         for widget in self.messages_frame.winfo_children():
             widget.destroy()
         
-        # Cargar mensajes
-        # Solicitar mensajes al servidor
+        self.all_messages = []
+        self.messages_has_more = False
+        self.loading_more_messages = False
+        
+        # Solicitar mensajes al servidor (máximo 10)
         get_messages_message = NetworkMessage(
             type="get_channel_messages",
-            data={"channel_id": self.current_channel.id},
+            data={"channel_id": self.current_channel.id, "limit": 10},
             sender_id=self.current_user.id if self.current_user else "unknown"
         )
         
         if not self.network_service.send(get_messages_message):
-            logger.error("Error enviando solicitud de canales")
-            logger.info(get_messages_message)
+            logger.error("Error enviando solicitud de mensajes")
             return
         
-        # Esperar respuesta
         if not self.response_event.wait(timeout=5.0):
             logger.error("Timeout obteniendo respuesta en _load_channel_messages")
             return
         
-        print(f"[CLIENT] Respuesta recibida: {self.response_data}")
-
         if not self.response_data or not self.response_data.get("success"):
-            logger.error("Error obteniendo canales")
+            logger.error("Error obteniendo mensajes")
             self.response_event.clear()
             return
 
-
         message_data = self.response_data.get("messages", [])
+        self.messages_has_more = self.response_data.get("has_more", False)
+        self.all_messages = message_data
         self.messages = message_data
-        logger.info(f"CHANNELS MESSAGE DATA : {self.messages}")
         self.response_event.clear()
         self._display_messages()
+        
+        # Configurar scroll-up para cargar más
+        self._setup_scroll_load_more()
+    
+    def _setup_scroll_load_more(self):
+        """Configura la detección de scroll hacia arriba para cargar más mensajes"""
+        def on_scroll(event=None):
+            try:
+                canvas = self.messages_frame._parent_canvas
+                # Si el scroll está cerca del inicio (arriba), cargar más mensajes
+                if canvas.yview()[0] <= 0.05 and self.messages_has_more and not self.loading_more_messages:
+                    self._load_more_messages()
+            except Exception:
+                pass
+        
+        # Bind scroll events
+        canvas = self.messages_frame._parent_canvas
+        canvas.bind("<Configure>", on_scroll)
+        # También bind del mousewheel
+        self.messages_frame.bind_all("<MouseWheel>", on_scroll)
+    
+    def _load_more_messages(self):
+        """Carga los siguientes 10 mensajes (scroll hacia arriba)"""
+        if not self.current_channel or not self.all_messages or self.loading_more_messages:
+            return
+        
+        self.loading_more_messages = True
+        
+        # El mensaje más antiguo es el primero en la lista
+        oldest_message = self.all_messages[0]
+        before_id = oldest_message.get('id')
+        
+        get_messages_message = NetworkMessage(
+            type="get_channel_messages",
+            data={
+                "channel_id": self.current_channel.id,
+                "limit": 10,
+                "before": before_id
+            },
+            sender_id=self.current_user.id if self.current_user else "unknown"
+        )
+        
+        if not self.network_service.send(get_messages_message):
+            self.loading_more_messages = False
+            return
+        
+        if not self.response_event.wait(timeout=5.0):
+            self.loading_more_messages = False
+            return
+        
+        if not self.response_data or not self.response_data.get("success"):
+            self.response_event.clear()
+            self.loading_more_messages = False
+            return
+        
+        older_messages = self.response_data.get("messages", [])
+        self.messages_has_more = self.response_data.get("has_more", False)
+        self.response_event.clear()
+        
+        if older_messages:
+            # Guardar posición de scroll actual
+            canvas = self.messages_frame._parent_canvas
+            scroll_pos = canvas.yview()
+            
+            # Insertar mensajes más antiguos al inicio
+            self.all_messages = older_messages + self.all_messages
+            self.messages = self.all_messages
+            
+            # Re-renderizar todos los mensajes
+            for widget in self.messages_frame.winfo_children():
+                widget.destroy()
+            self._display_messages()
+            
+            # Restaurar posición de scroll (aproximada)
+            canvas.yview_moveto(scroll_pos[0])
+        
+        self.loading_more_messages = False
     
     def _display_messages(self):
         """Muestra los mensajes en el chat"""
         for message in self.messages:
-            # Obtener autor (simplificado)
-            logger.info(f"Display de mensajes : MESSAGE_DATA :{self.messages}")
             author_name = f"Usuario {message['author_id'][:8]}"
+            message_type = message.get('message_type', 'text')
             
+            if message_type == 'file':
+                self._display_file_message(message, author_name)
+            else:
+                bubble = MessageBubble(
+                    self.messages_frame,
+                    author=author_name,
+                    content=message['content'],
+                    timestamp=message['created_at'],
+                    is_own=(message['author_id'] == self.current_user.id if self.current_user else False)
+                )
+                bubble.pack(fill="x", pady=5, padx=10)
+        
+            self.messages_frame._parent_canvas.yview_moveto(1.0)
+    
+    def _display_file_message(self, message: dict, author_name: str):
+        """Muestra un mensaje de archivo con botón de descarga"""
+        attachments = message.get('attachments', [])
+        is_own = message['author_id'] == self.current_user.id if self.current_user else False
+        
+        frame = ctk.CTkFrame(
+            self.messages_frame,
+            fg_color=("#DCF8C6", "#2B7D31") if is_own else ("gray90", "gray15")
+        )
+        frame.pack(fill="x", pady=5, padx=10)
+        frame.grid_columnconfigure(1, weight=1)
+        
+        # Avatar
+        avatar = ctk.CTkLabel(
+            frame,
+            text=author_name[:2].upper(),
+            width=32, height=32, corner_radius=16,
+            fg_color="#7289DA", text_color="white",
+            font=ctk.CTkFont(size=12, weight="bold")
+        )
+        avatar.grid(row=0, column=0, padx=8, pady=8, sticky="nw")
+        
+        # Contenido
+        content_frame = ctk.CTkFrame(frame, fg_color="transparent")
+        content_frame.grid(row=0, column=1, padx=(0, 8), pady=8, sticky="nsew")
+        
+        # Header
+        header = ctk.CTkFrame(content_frame, fg_color="transparent")
+        header.pack(fill="x")
+        
+        ctk.CTkLabel(
+            header, text=author_name,
+            font=ctk.CTkFont(size=12, weight="bold"), anchor="w"
+        ).pack(side="left", padx=(0, 8))
+        
+        ctk.CTkLabel(
+            header, text=message.get('created_at', ''),
+            font=ctk.CTkFont(size=10), text_color="gray60"
+        ).pack(side="left")
+        
+        # Archivos adjuntos
+        for att in attachments:
+            filename = att.get('filename', 'archivo')
+            file_size = att.get('file_size', 0)
+            download_url = att.get('download_url', '')
+            
+            file_frame = ctk.CTkFrame(content_frame, fg_color=("gray80", "gray25"), corner_radius=8)
+            file_frame.pack(fill="x", pady=(5, 0))
+            
+            size_text = f"{file_size / 1024:.1f} KB" if file_size < 1024 * 1024 else f"{file_size / (1024*1024):.1f} MB"
+            
+            ctk.CTkLabel(
+                file_frame,
+                text=f"📎 {filename} ({size_text})",
+                font=ctk.CTkFont(size=12),
+                anchor="w"
+            ).pack(side="left", padx=10, pady=8)
+            
+            if download_url:
+                ctk.CTkButton(
+                    file_frame,
+                    text="⬇ Descargar",
+                    width=100, height=28,
+                    font=ctk.CTkFont(size=11),
+                    command=lambda url=download_url, fn=filename: self._on_download_file(url, fn)
+                ).pack(side="right", padx=10, pady=5)
+    
+    def _display_new_message(self, message):
+        """Muestra un nuevo mensaje recibido en el chat"""
+        author_name = f"Usuario {message['author_id'][:8]}"
+        message_type = message.get('message_type', 'text')
+        
+        if message_type == 'file':
+            self._display_file_message(message, author_name)
+        else:
             bubble = MessageBubble(
                 self.messages_frame,
                 author=author_name,
@@ -647,26 +959,6 @@ class MainWindow(ctk.CTk):
             )
             bubble.pack(fill="x", pady=5, padx=10)
         
-            # Scroll al final
-            self.messages_frame._parent_canvas.yview_moveto(1.0)
-    
-    def _display_new_message(self, message):
-        """Muestra los mensajes en el chat"""
-
-        # Obtener autor (simplificado)
-        logger.info(f"Display de mensajes : MESSAGE_DATA :{self.messages}")
-        author_name = f"Usuario {message['author_id'][:8]}"
-        
-        bubble = MessageBubble(
-            self.messages_frame,
-            author=author_name,
-            content=message['content'],
-            timestamp=message['created_at'],
-            is_own=(message['author_id'] == self.current_user.id if self.current_user else False)
-        )
-        bubble.pack(fill="x", pady=5, padx=10)
-        
-        # Scroll al final
         self.messages_frame._parent_canvas.yview_moveto(1.0)
     
     def _send_message(self):
@@ -691,8 +983,7 @@ class MainWindow(ctk.CTk):
         
         if not self.network_service.send(send_message_message):
             self.message_entry.delete(0, "end")
-            logger.error("Error enviando solicitud de canales")
-            logger.info(send_message_message)
+            logger.error("Error enviando mensaje")
             return
         
         # Esperar respuesta
@@ -700,18 +991,16 @@ class MainWindow(ctk.CTk):
             logger.error("Timeout obteniendo respuesta en _send_message")
             return
         
-        print(f"[CLIENT] Respuesta recibida: {self.response_data}")
-
         if not self.response_data or not self.response_data.get("success"):
             logger.error("Error enviando mensaje")
             self.response_event.clear()
             return
 
-
-        message_data = self.response_data.get("channels", [])
-        self.messages = message_data
-        logger.info(f"SEND MESSAGE DATA : {self.messages}")
+        # Limpiar input
+        self.message_entry.delete(0, "end")
         self.response_event.clear()
+        
+        # Recargar mensajes
         self._load_channel_messages()
 
     
@@ -720,6 +1009,10 @@ class MainWindow(ctk.CTk):
         if not self.current_server:
             return
         
+        # Limpiar lista actual
+        for widget in self.members_frame.winfo_children():
+            widget.destroy()
+        
         # Solicitar miembros al servidor
         get_members_message = NetworkMessage(
             type="get_server_members",
@@ -727,14 +1020,122 @@ class MainWindow(ctk.CTk):
             sender_id=self.current_user.id if self.current_user else "unknown"
         )
         
-        if self.network_service.send(get_members_message):
-            # En una implementación real, esperaríamos la respuesta de forma asíncrona
-            # Por ahora, simulamos con datos vacíos y limpiamos la lista
-            for widget in self.members_frame.winfo_children():
-                widget.destroy()
-            logger.info(f"Solicitud de miembros enviada para servidor {self.current_server.name}")
-        else:
+        if not self.network_service.send(get_members_message):
             logger.error("Error enviando solicitud de miembros")
+            return
+        
+        # Esperar respuesta
+        if not self.response_event.wait(timeout=5.0):
+            logger.error("Timeout esperando miembros")
+            return
+        
+        if not self.response_data or not self.response_data.get("success"):
+            logger.error("Error obteniendo miembros")
+            self.response_event.clear()
+            return
+        
+        members_data = self.response_data.get("members", [])
+        self.response_event.clear()
+        
+        # Renderizar miembros
+        self._display_members(members_data)
+    
+    def _display_members(self, members_data: list):
+        """Muestra los miembros en el panel lateral"""
+        for widget in self.members_frame.winfo_children():
+            widget.destroy()
+        
+        if not members_data:
+            ctk.CTkLabel(
+                self.members_frame,
+                text="Sin miembros",
+                text_color="gray60"
+            ).pack(pady=10)
+            return
+        
+        # Agrupar por roles hoisted
+        hoisted_roles = {}
+        no_role_members = []
+        
+        # Obtener roles del servidor para identificar hoisted
+        for member_info in members_data:
+            user = member_info.get('user', {})
+            roles = member_info.get('roles', [])
+            
+            hoisted_role = None
+            for role in roles:
+                if role.get('hoisted'):
+                    if not hoisted_role or role.get('position', 0) > hoisted_role.get('position', 0):
+                        hoisted_role = role
+            
+            if hoisted_role:
+                role_name = hoisted_role['name']
+                if role_name not in hoisted_roles:
+                    hoisted_roles[role_name] = {
+                        'color': hoisted_role.get('color', '#99AAB5'),
+                        'position': hoisted_role.get('position', 0),
+                        'members': []
+                    }
+                hoisted_roles[role_name]['members'].append(member_info)
+            else:
+                no_role_members.append(member_info)
+        
+        # Mostrar grupos de roles hoisted (ordenados por posición)
+        sorted_roles = sorted(hoisted_roles.items(), key=lambda x: x[1]['position'], reverse=True)
+        
+        for role_name, role_data in sorted_roles:
+            role_label = ctk.CTkLabel(
+                self.members_frame,
+                text=f"{role_name} — {len(role_data['members'])}",
+                font=ctk.CTkFont(size=11, weight="bold"),
+                text_color=role_data['color'],
+                anchor="w"
+            )
+            role_label.pack(pady=(10, 2), padx=5, fill="x")
+            
+            for member_info in role_data['members']:
+                self._create_member_item(member_info)
+        
+        # Mostrar "Miembros" para los que no tienen rol hoisted
+        if no_role_members:
+            members_label = ctk.CTkLabel(
+                self.members_frame,
+                text=f"Miembros — {len(no_role_members)}",
+                font=ctk.CTkFont(size=11, weight="bold"),
+                text_color="#99AAB5",
+                anchor="w"
+            )
+            members_label.pack(pady=(10, 2), padx=5, fill="x")
+            
+            for member_info in no_role_members:
+                self._create_member_item(member_info)
+    
+    def _create_member_item(self, member_info: dict):
+        """Crea un item de miembro en la lista"""
+        user = member_info.get('user', {})
+        member = member_info.get('member', {})
+        roles = member_info.get('roles', [])
+        
+        username = user.get('username', 'Usuario')
+        status = user.get('status', 'offline')
+        
+        # Color del rol más alto
+        role_color = "#99AAB5"
+        for role in roles:
+            if role.get('color'):
+                role_color = role['color']
+                break
+        
+        item = UserListItem(
+            self.members_frame,
+            username=username,
+            status=status,
+            roles=[r.get('name', '') for r in roles],
+            user_id=user.get('id', ''),
+            role_color=role_color,
+            on_assign_role=self._on_assign_role if self.current_server and self.current_server.owner_id == self.current_user.id else None
+        )
+        item.pack(pady=1, padx=5, fill="x")
     
     def _on_add_server(self):
         """Muestra modal para crear servidor"""
@@ -744,6 +1145,17 @@ class MainWindow(ctk.CTk):
         modal = CreateServerModal(
             self,
             on_create=self._on_create_server
+        )
+    
+    def _on_join_server(self):
+        """Muestra modal para unirse a un servidor con código de invitación"""
+        if not self.current_user:
+            return
+        
+        AcceptInviteDialog(
+            self,
+            user_id=self.current_user.id,
+            on_success=self._load_user_servers
         )
     
     def _on_create_server(self, **kwargs):
@@ -862,9 +1274,347 @@ class MainWindow(ctk.CTk):
     
     def _on_roles_saved(self):
         """Callback cuando se guardan los roles"""
-        # Recargar canales y miembros por si los roles afectan permisos
         self._load_server_channels()
         self._load_server_members()
+    
+    def _on_invite(self):
+        """Muestra modal para gestionar invitaciones"""
+        if not self.current_server or not self.current_user:
+            return
+        
+        InviteModal(
+            self,
+            server_id=self.current_server.id,
+            server_name=self.current_server.name,
+            user_id=self.current_user.id
+        )
+    
+    def _on_attach_file(self):
+        """Abre diálogo para adjuntar un archivo"""
+        if not self.current_channel or not self.current_user:
+            return
+        
+        from tkinter import filedialog
+        filepath = filedialog.askopenfilename(
+            title="Seleccionar archivo",
+            filetypes=[("Todos los archivos", "*.*")]
+        )
+        
+        if not filepath:
+            return
+        
+        # Leer archivo y enviar
+        try:
+            filename = os.path.basename(filepath)
+            with open(filepath, 'rb') as f:
+                file_bytes = f.read()
+            
+            file_data_b64 = base64.b64encode(file_bytes).decode()
+            
+            # Limitar tamaño (10MB)
+            if len(file_bytes) > 10 * 1024 * 1024:
+                self._show_error_dialog("El archivo es demasiado grande (máximo 10MB)")
+                return
+            
+            upload_msg = NetworkMessage(
+                type="upload_file",
+                data={
+                    "file_data": file_data_b64,
+                    "filename": filename,
+                    "channel_id": self.current_channel.id,
+                    "user_id": self.current_user.id
+                },
+                sender_id=self.current_user.id
+            )
+            
+            if not self.network_service.send(upload_msg):
+                self._show_error_dialog("Error enviando archivo")
+                return
+            
+            if not self.response_event.wait(timeout=10.0):
+                self._show_error_dialog("Timeout subiendo archivo")
+                return
+            
+            if not self.response_data or not self.response_data.get("success"):
+                error = self.response_data.get("error", "Error desconocido") if self.response_data else "Error"
+                self._show_error_dialog(f"Error: {error}")
+            
+            self.response_event.clear()
+            
+        except Exception as e:
+            self._show_error_dialog(f"Error: {str(e)}")
+    
+    def _on_download_file(self, download_url: str, filename: str):
+        """Descarga un archivo del servidor"""
+        if not self.current_user:
+            return
+        
+        from tkinter import filedialog
+        save_path = filedialog.asksaveasfilename(
+            title="Guardar archivo",
+            initialfile=filename,
+            defaultextension=".*"
+        )
+        
+        if not save_path:
+            return
+        
+        try:
+            download_msg = NetworkMessage(
+                type="download_file",
+                data={
+                    "download_url": download_url,
+                    "filename": filename,
+                    "user_id": self.current_user.id
+                },
+                sender_id=self.current_user.id
+            )
+            
+            if not self.network_service.send(download_msg):
+                self._show_error_dialog("Error solicitando descarga")
+                return
+            
+            if not self.response_event.wait(timeout=30.0):
+                self._show_error_dialog("Timeout descargando archivo")
+                return
+            
+            if not self.response_data or not self.response_data.get("success"):
+                error = self.response_data.get("error", "Error desconocido") if self.response_data else "Error"
+                self._show_error_dialog(f"Error: {error}")
+                self.response_event.clear()
+                return
+            
+            file_data_b64 = self.response_data.get("file_data")
+            file_bytes = base64.b64decode(file_data_b64)
+            
+            with open(save_path, 'wb') as f:
+                f.write(file_bytes)
+            
+            self.response_event.clear()
+            
+        except Exception as e:
+            self._show_error_dialog(f"Error: {str(e)}")
+    
+    def _on_start_voice_call(self):
+        """Inicia una llamada de voz"""
+        if not self.current_channel or not self.current_user:
+            return
+        
+        self.in_call = True
+        self.call_type = "voice"
+        
+        start_msg = NetworkMessage(
+            type="start_call",
+            data={
+                "channel_id": self.current_channel.id,
+                "user_id": self.current_user.id,
+                "call_type": "voice"
+            },
+            sender_id=self.current_user.id
+        )
+        self.network_service.send(start_msg)
+        
+        self.voice_call_btn.configure(state="disabled")
+        self.video_call_btn.configure(state="disabled")
+        self.end_call_btn.configure(state="normal")
+    
+    def _on_start_video_call(self):
+        """Inicia una llamada de video"""
+        if not self.current_channel or not self.current_user:
+            return
+        
+        self.in_call = True
+        self.call_type = "video"
+        
+        start_msg = NetworkMessage(
+            type="start_call",
+            data={
+                "channel_id": self.current_channel.id,
+                "user_id": self.current_user.id,
+                "call_type": "video"
+            },
+            sender_id=self.current_user.id
+        )
+        self.network_service.send(start_msg)
+        
+        # Unirse a la llamada
+        join_msg = NetworkMessage(
+            type="join_call",
+            data={
+                "channel_id": self.current_channel.id,
+                "user_id": self.current_user.id
+            },
+            sender_id=self.current_user.id
+        )
+        self.network_service.send(join_msg)
+        
+        self.voice_call_btn.configure(state="disabled")
+        self.video_call_btn.configure(state="disabled")
+        self.screen_share_btn.configure(state="normal")
+        self.end_call_btn.configure(state="normal")
+    
+    def _on_screen_share(self):
+        """Inicia compartir pantalla"""
+        if not self.current_channel or not self.current_user:
+            return
+        
+        self.screen_sharing = True
+        
+        share_msg = NetworkMessage(
+            type="screen_share_start",
+            data={
+                "channel_id": self.current_channel.id,
+                "user_id": self.current_user.id
+            },
+            sender_id=self.current_user.id
+        )
+        self.network_service.send(share_msg)
+        
+        self.screen_share_btn.configure(state="disabled")
+        self.end_call_btn.configure(state="normal")
+    
+    def _on_end_call(self):
+        """Termina la llamada actual"""
+        if not self.current_channel or not self.current_user:
+            return
+        
+        if self.in_call:
+            leave_msg = NetworkMessage(
+                type="leave_call",
+                data={
+                    "channel_id": self.current_channel.id,
+                    "user_id": self.current_user.id
+                },
+                sender_id=self.current_user.id
+            )
+            self.network_service.send(leave_msg)
+        
+        if self.screen_sharing:
+            stop_msg = NetworkMessage(
+                type="screen_share_stop",
+                data={
+                    "channel_id": self.current_channel.id,
+                    "user_id": self.current_user.id
+                },
+                sender_id=self.current_user.id
+            )
+            self.network_service.send(stop_msg)
+        
+        self.in_call = False
+        self.screen_sharing = False
+        self.call_type = None
+        
+        # Restaurar botones según tipo de canal
+        if self.current_channel:
+            channel_type = self.current_channel.type.value if hasattr(self.current_channel.type, 'value') else self.current_channel.type
+            if channel_type == 'voice':
+                self.voice_call_btn.configure(state="normal")
+                self.video_call_btn.configure(state="disabled")
+                self.screen_share_btn.configure(state="normal")
+            elif channel_type == 'video':
+                self.voice_call_btn.configure(state="normal")
+                self.video_call_btn.configure(state="normal")
+                self.screen_share_btn.configure(state="normal")
+        
+        self.end_call_btn.configure(state="disabled")
+    
+    def _handle_call_started(self, data):
+        """Maneja notificación de llamada iniciada"""
+        channel_id = data.get("channel_id")
+        call_type = data.get("call_type", "voice")
+        initiator_id = data.get("initiator_id")
+        
+        if self.current_channel and self.current_channel.id == channel_id:
+            if not self.in_call:
+                self.voice_call_btn.configure(state="disabled")
+                self.video_call_btn.configure(state="disabled")
+                self.end_call_btn.configure(state="normal")
+    
+    def _handle_call_user_joined(self, data):
+        """Maneja cuando un usuario se une a la llamada"""
+        user_id = data.get("user_id")
+        channel_id = data.get("channel_id")
+        logger.info(f"Usuario {user_id} se unió a la llamada en canal {channel_id}")
+    
+    def _handle_call_user_left(self, data):
+        """Maneja cuando un usuario abandona la llamada"""
+        user_id = data.get("user_id")
+        channel_id = data.get("channel_id")
+        logger.info(f"Usuario {user_id} abandonó la llamada en canal {channel_id}")
+    
+    def _handle_video_frame(self, data):
+        """Maneja frames de video recibidos"""
+        # En una implementación completa, se renderizaría el frame
+        pass
+    
+    def _handle_audio_frame(self, data):
+        """Maneja frames de audio recibidos"""
+        # En una implementación completa, se reproduciría el audio
+        pass
+    
+    def _handle_screen_share_started(self, data):
+        """Maneja cuando alguien comparte pantalla"""
+        user_id = data.get("user_id")
+        logger.info(f"Usuario {user_id} está compartiendo pantalla")
+    
+    def _handle_screen_share_stopped(self, data):
+        """Maneja cuando alguien deja de compartir pantalla"""
+        user_id = data.get("user_id")
+        logger.info(f"Usuario {user_id} dejó de compartir pantalla")
+    
+    def _on_assign_role(self, user_id: str, role_id: str):
+        """Asigna un rol a un usuario"""
+        if not self.current_server or not self.current_user:
+            return
+        
+        assign_msg = NetworkMessage(
+            type="assign_role",
+            data={
+                "server_id": self.current_server.id,
+                "user_id": self.current_user.id,
+                "target_user_id": user_id,
+                "role_id": role_id
+            },
+            sender_id=self.current_user.id
+        )
+        
+        if not self.network_service.send(assign_msg):
+            return
+        
+        if not self.response_event.wait(timeout=5.0):
+            return
+        
+        if self.response_data and self.response_data.get("success"):
+            self._load_server_members()
+        
+        self.response_event.clear()
+    
+    def _on_remove_role(self, user_id: str, role_id: str):
+        """Remueve un rol de un usuario"""
+        if not self.current_server or not self.current_user:
+            return
+        
+        remove_msg = NetworkMessage(
+            type="remove_role",
+            data={
+                "server_id": self.current_server.id,
+                "user_id": self.current_user.id,
+                "target_user_id": user_id,
+                "role_id": role_id
+            },
+            sender_id=self.current_user.id
+        )
+        
+        if not self.network_service.send(remove_msg):
+            return
+        
+        if not self.response_event.wait(timeout=5.0):
+            return
+        
+        if self.response_data and self.response_data.get("success"):
+            self._load_server_members()
+        
+        self.response_event.clear()
     
     def _show_main_interface(self):
         """Muestra la interfaz principal"""
@@ -874,3 +1624,18 @@ class MainWindow(ctk.CTk):
     def set_host_ip(self, host, port):
         self.host = host
         self.port = port
+    
+    def _show_error_dialog(self, message: str):
+        """Muestra un diálogo de error"""
+        error_win = ctk.CTkToplevel(self)
+        error_win.title("Error")
+        error_win.geometry("350x120")
+        error_win.resizable(False, False)
+        error_win.transient(self)
+        error_win.grab_set()
+        
+        label = ctk.CTkLabel(error_win, text=message, wraplength=300)
+        label.pack(expand=True, padx=20, pady=20)
+        
+        btn = ctk.CTkButton(error_win, text="OK", command=error_win.destroy)
+        btn.pack(pady=(0, 10))

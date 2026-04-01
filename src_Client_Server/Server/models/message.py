@@ -27,7 +27,7 @@ class MessageCreate(MessageBase):
     author_id: str
     reply_to: Optional[str] = None
     mentions: List[str] = []
-    attachments: List[str] = []
+    attachments: List[Dict[str, Any]] = []
 
 
 class Message(MessageBase):
@@ -37,7 +37,7 @@ class Message(MessageBase):
     author_id: str
     reply_to: Optional[str]
     mentions: List[str]
-    attachments: List[str]
+    attachments: List[Dict[str, Any]] = []
     edited: bool = False
     edited_at: Optional[datetime] = None
     created_at: datetime = field(default_factory=datetime.now)

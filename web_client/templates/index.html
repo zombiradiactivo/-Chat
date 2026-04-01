@@ -80,9 +80,11 @@
                 <button class="icon-btn" id="settings-btn" onclick="showServerSettings()" disabled>&#9881;</button>
                 <span id="server-name">Selecciona un servidor</span>
                 <button class="icon-btn" id="roles-btn" onclick="showManageRoles()" disabled>&#128101;</button>
+                <button class="icon-btn" id="invite-btn" onclick="showInviteModal()" disabled>&#128279;</button>
             </div>
             <div class="channel-list" id="channel-list">
                 <button class="btn btn-sm btn-outline" onclick="showCreateChannel()" id="create-channel-btn" disabled>+ Crear Canal</button>
+                <button class="btn btn-sm btn-outline" onclick="showJoinServer()" style="margin-top:5px">&#128279; Unirse a servidor</button>
             </div>
         </div>
 
@@ -90,9 +92,19 @@
         <div class="chat-panel">
             <div class="chat-header">
                 <span id="channel-name"># Selecciona un canal</span>
+                <div class="call-controls">
+                    <button class="icon-btn" id="voice-call-btn" onclick="startVoiceCall()" disabled title="Llamada de voz">&#128222;</button>
+                    <button class="icon-btn" id="video-call-btn" onclick="startVideoCall()" disabled title="Videollamada">&#127909;</button>
+                    <button class="icon-btn" id="screen-share-btn" onclick="startScreenShare()" disabled title="Compartir pantalla">&#128421;</button>
+                    <button class="icon-btn call-active" id="end-call-btn" onclick="endCall()" style="display:none" title="Finalizar">&#128308;</button>
+                </div>
             </div>
             <div class="messages-container" id="messages-container"></div>
             <div class="message-input-area">
+                <label class="file-attach-btn" title="Adjuntar archivo">
+                    &#128206;
+                    <input type="file" id="file-input" style="display:none" onchange="handleFileUpload(event)">
+                </label>
                 <input type="text" id="message-input" placeholder="Escribe un mensaje..." onkeypress="handleMessageKeypress(event)">
                 <button class="btn btn-primary btn-send" onclick="sendMessage()">Enviar</button>
             </div>
@@ -180,6 +192,42 @@
             </div>
             <div class="modal-actions">
                 <button class="btn btn-secondary" onclick="closeModal('manage-roles-modal')">Cerrar</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Invite Modal -->
+    <div id="invite-modal" class="modal">
+        <div class="modal-content">
+            <h2>Invitaciones</h2>
+            <div id="invites-list" class="invites-list"></div>
+            <hr>
+            <h3>Crear nueva invitacion</h3>
+            <div class="form-group">
+                <label>Max usos (opcional)</label>
+                <input type="number" id="invite-max-uses" placeholder="Sin limite">
+            </div>
+            <div class="form-group">
+                <label>Expira en (horas, opcional)</label>
+                <input type="number" id="invite-expires" placeholder="Nunca">
+            </div>
+            <div class="modal-actions">
+                <button class="btn btn-secondary" onclick="closeModal('invite-modal')">Cerrar</button>
+                <button class="btn btn-primary" onclick="createInvite()">Crear Invitacion</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Join Server Modal -->
+    <div id="join-server-modal" class="modal">
+        <div class="modal-content">
+            <h2>Unirse a un servidor</h2>
+            <div class="form-group">
+                <input type="text" id="invite-code" placeholder="Codigo de invitacion (ej: ABC12345)" style="text-transform:uppercase">
+            </div>
+            <div class="modal-actions">
+                <button class="btn btn-secondary" onclick="closeModal('join-server-modal')">Cancelar</button>
+                <button class="btn btn-primary" onclick="acceptInvite()">Unirse</button>
             </div>
         </div>
     </div>
