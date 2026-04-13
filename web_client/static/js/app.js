@@ -374,6 +374,7 @@ function renderChannelList() {
 
     const textChannels = channels.filter(c => c.type === 'text');
     const voiceChannels = channels.filter(c => c.type === 'voice');
+    const videoChannels = channels.filter(c => c.type === 'video');
 
     if (textChannels.length > 0) {
         const title = document.createElement('div');
@@ -396,6 +397,17 @@ function renderChannelList() {
             container.appendChild(createChannelItem(channel));
         });
     }
+
+    if (videoChannels.length > 0) {
+        const title = document.createElement('div');
+        title.className = 'channel-section-title';
+        title.textContent = 'CANALES DE VIDEO';
+        container.appendChild(title);
+
+        videoChannels.forEach(channel => {
+            container.appendChild(createChannelItem(channel));
+        });
+    }
 }
 
 function createChannelItem(channel) {
@@ -405,7 +417,12 @@ function createChannelItem(channel) {
         btn.classList.add('active');
     }
 
-    const icon = channel.type === 'voice' ? '&#127908;' : '#';
+    const icons = {
+        'text': '#',
+        'voice': '&#127908;',
+        'video': '&#127909;'
+    };
+    const icon = icons[channel.type] || '#';
     btn.innerHTML = `<span class="channel-icon">${icon}</span> ${channel.name}`;
     btn.onclick = () => selectChannel(channel);
 
@@ -1176,55 +1193,408 @@ function downloadFile(downloadUrl, filename) {
 
 // ==================== LLAMADAS ====================
 
-function startVoiceCall() {
+let callParticipants = {};
+let localStream = null;
+let isMuted = false;
+let isVideoEnabled = false;
+let isScreenSharing = false;
+let isViewingScreenShare = false;
+
+function showVoiceCallModal() {
+    loadAudioDevices('audio');
+    openModal('voice-call-modal');
+}
+
+function showVideoCallModal() {
+    loadAudioDevices('video');
+    openModal('video-call-modal');
+}
+
+function showScreenShareModal() {
+    loadDisplayInfo();
+    openModal('screen-share-modal');
+}
+
+function loadAudioDevices(type) {
+    navigator.mediaDevices.enumerateDevices()
+        .then(devices => {
+            const audioInput = document.getElementById(type === 'audio' ? 'audio-input-device' : 'video-audio-input');
+            const audioOutput = document.getElementById(type === 'audio' ? 'audio-output-device' : 'video-audio-output');
+            
+            if (audioInput) {
+                audioInput.innerHTML = '<option value="default">Predeterminado</option>';
+                devices.filter(d => d.kind === 'audioinput').forEach(d => {
+                    audioInput.innerHTML += `<option value="${d.deviceId}">${d.label || 'Micrófono ' + d.deviceId.slice(0, 8)}</option>`;
+                });
+            }
+            
+            if (audioOutput) {
+                audioOutput.innerHTML = '<option value="default">Predeterminado</option>';
+                devices.filter(d => d.kind === 'audiooutput').forEach(d => {
+                    audioOutput.innerHTML += `<option value="${d.deviceId}">${d.label || 'Altavoz ' + d.deviceId.slice(0, 8)}</option>`;
+                });
+            }
+        })
+        .catch(err => console.error('Error enumerating devices:', err));
+}
+
+function loadDisplayInfo() {
+    if (navigator.mediaDevices && navigator.mediaDevices.getDisplayMedia) {
+        const displaySelect = document.getElementById('share-display');
+        if (displaySelect) {
+            displaySelect.innerHTML = '<option value="0">Monitor 1</option><option value="1">Monitor 2</option>';
+        }
+    }
+}
+
+function updateShareOptions() {
+    const sourceType = document.getElementById('share-source-type').value;
+    const displayGroup = document.getElementById('display-select-group');
+    if (displayGroup) {
+        displayGroup.style.display = sourceType === 'display' ? 'block' : 'none';
+    }
+}
+
+async function startVoiceCall() {
     if (!currentChannel || !currentUser) return;
+    
+    const audioInput = document.getElementById('audio-input-device')?.value || 'default';
+    const audioOutput = document.getElementById('audio-output-device')?.value || 'default';
+    
+    closeModal('voice-call-modal');
+    
+    try {
+        localStream = await navigator.mediaDevices.getUserMedia({ 
+            audio: { deviceId: audioInput !== 'default' ? { exact: audioInput } : true },
+            video: false 
+        });
+    } catch (e) {
+        console.log('No se pudo obtener audio local');
+    }
+    
     sendTcpMessage('start_call', {
         channel_id: currentChannel.id,
         user_id: currentUser.id,
-        call_type: 'voice'
+        call_type: 'voice',
+        audio_input: audioInput,
+        audio_output: audioOutput
     });
-    document.getElementById('end-call-btn').style.display = 'inline-block';
+    
+    showCallUI('voice');
+    document.getElementById('toggle-video-btn').style.display = 'none';
+    document.getElementById('toggle-screen-share-btn').style.display = 'none';
+    document.getElementById('toggle-screenshare-view-btn').style.display = 'none';
     document.getElementById('voice-call-btn').disabled = true;
     document.getElementById('video-call-btn').disabled = true;
 }
 
-function startVideoCall() {
+async function startVideoCall() {
     if (!currentChannel || !currentUser) return;
+    
+    const videoDevice = document.getElementById('video-input-device')?.value || 'default';
+    const audioInput = document.getElementById('video-audio-input')?.value || 'default';
+    const audioOutput = document.getElementById('video-audio-output')?.value || 'default';
+    
+    closeModal('video-call-modal');
+    
+    try {
+        localStream = await navigator.mediaDevices.getUserMedia({ 
+            video: { deviceId: videoDevice !== 'default' ? { exact: videoDevice } : true },
+            audio: { deviceId: audioInput !== 'default' ? { exact: audioInput } : true }
+        });
+        isVideoEnabled = true;
+    } catch (e) {
+        console.log('No se pudo obtener stream local');
+    }
+    
     sendTcpMessage('start_call', {
         channel_id: currentChannel.id,
         user_id: currentUser.id,
-        call_type: 'video'
+        call_type: 'video',
+        video_input: videoDevice,
+        audio_input: audioInput,
+        audio_output: audioOutput
     });
+    
     sendTcpMessage('join_call', {
         channel_id: currentChannel.id,
         user_id: currentUser.id
     });
-    document.getElementById('end-call-btn').style.display = 'inline-block';
+    
+    showCallUI('video');
+    document.getElementById('toggle-video-btn').style.display = 'block';
+    document.getElementById('toggle-screen-share-btn').style.display = 'block';
+    document.getElementById('toggle-screenshare-view-btn').style.display = 'none';
     document.getElementById('voice-call-btn').disabled = true;
     document.getElementById('video-call-btn').disabled = true;
 }
 
-function startScreenShare() {
+async function startScreenShare() {
     if (!currentChannel || !currentUser) return;
+    
+    const sourceType = document.getElementById('share-source-type')?.value || 'screen';
+    const displayId = document.getElementById('share-display')?.value || '0';
+    const resolution = document.getElementById('share-resolution')?.value || '1920x1080';
+    const fps = document.getElementById('share-fps')?.value || '30';
+    const quality = 80;
+    
+    closeModal('screen-share-modal');
+    
+    try {
+        const screenStream = await navigator.mediaDevices.getDisplayMedia({
+            video: { displaySurface: sourceType === 'display' ? 'monitor' : 'window' }
+        });
+        isScreenSharing = true;
+        document.getElementById('toggle-screenshare-view-btn').style.display = 'block';
+        
+        screenStream.getVideoTracks()[0].onended = () => {
+            stopScreenShare();
+        };
+    } catch (e) {
+        console.log('Screen share cancelled');
+    }
+    
     sendTcpMessage('screen_share_start', {
+        channel_id: currentChannel.id,
+        user_id: currentUser.id,
+        source_type: sourceType,
+        display_id: parseInt(displayId),
+        resolution: resolution,
+        fps: parseInt(fps),
+        quality: quality
+    });
+    
+    document.getElementById('screen-share-btn').disabled = true;
+}
+
+function showCallUI(callType) {
+    const callUI = document.getElementById('call-ui');
+    const channelName = document.getElementById('call-channel-name');
+    
+    if (currentChannel) {
+        channelName.textContent = '# ' + currentChannel.name;
+    }
+    
+    callUI.style.display = 'flex';
+    
+    addParticipant(currentUser.id, currentUser.username || currentUser.email, callType === 'video');
+    updateParticipantList();
+    
+    if (localStream && callType === 'video') {
+        addLocalVideo();
+    }
+}
+
+function hideCallUI() {
+    const callUI = document.getElementById('call-ui');
+    callUI.style.display = 'none';
+    
+    document.getElementById('screen-share-view').style.display = 'none';
+    document.getElementById('video-grid').innerHTML = '';
+    
+    if (localStream) {
+        localStream.getTracks().forEach(track => track.stop());
+        localStream = null;
+    }
+    
+    callParticipants = {};
+    isMuted = false;
+    isVideoEnabled = false;
+    isScreenSharing = false;
+    isViewingScreenShare = false;
+}
+
+function addParticipant(userId, username, hasVideo) {
+    callParticipants[userId] = {
+        id: userId,
+        name: username,
+        hasVideo: hasVideo,
+        muted: false,
+        speaking: false
+    };
+    updateParticipantList();
+}
+
+function removeParticipant(userId) {
+    delete callParticipants[userId];
+    updateParticipantList();
+    
+    const participantEl = document.getElementById('participant-' + userId);
+    if (participantEl) {
+        participantEl.remove();
+    }
+}
+
+function updateParticipantList() {
+    const listEl = document.getElementById('participants-list');
+    const countEl = document.getElementById('participant-count');
+    const template = document.getElementById('participant-template');
+    
+    listEl.innerHTML = '';
+    const count = Object.keys(callParticipants).length;
+    countEl.textContent = count;
+    
+    Object.values(callParticipants).forEach(p => {
+        const item = document.createElement('div');
+        item.className = 'participant-item' + (p.speaking ? ' speaking' : '');
+        item.id = 'participant-' + p.id;
+        
+        const initial = p.name.charAt(0).toUpperCase();
+        const isSelf = p.id === currentUser?.id || p.id === currentUser?.email;
+        
+        let stateHtml = '';
+        if (p.muted) stateHtml += '<span>🔇</span>';
+        if (isSelf) stateHtml += '<span>(tú)</span>';
+        
+        item.innerHTML = `
+            <div class="participant-avatar" style="background: ${getParticipantColor(p.id)}">${initial}</div>
+            <div class="participant-details">
+                <div class="participant-item-name">${escapeHtml(p.name)}</div>
+                <div class="participant-state">${stateHtml}</div>
+            </div>
+            ${!isSelf ? '<button class="participant-btn" title="Mencionar">&#128172;</button>' : ''}
+        `;
+        
+        item.onclick = () => setActiveSpeaker(p.id);
+        listEl.appendChild(item);
+    });
+}
+
+function getParticipantColor(userId) {
+    const colors = ['#5865f2', '#57f287', '#fee75c', '#ed4245', '#faa61a', '#8ea1e1'];
+    let hash = 0;
+    for (let i = 0; i < userId.length; i++) {
+        hash = userId.charCodeAt(i) + ((hash << 5) - hash);
+    }
+    return colors[Math.abs(hash) % colors.length];
+}
+
+function addLocalVideo() {
+    const grid = document.getElementById('video-grid');
+    const template = document.getElementById('video-participant-template').cloneNode(true);
+    template.id = 'video-local';
+    template.style.display = 'block';
+    
+    const video = template.querySelector('video');
+    if (localStream && video) {
+        video.srcObject = localStream;
+    }
+    
+    template.querySelector('.participant-name').textContent = 'Tú';
+    template.querySelector('.participant-muted').style.display = isMuted ? 'block' : 'none';
+    
+    grid.appendChild(template);
+}
+
+function setActiveSpeaker(userId) {
+    document.querySelectorAll('.participant-item').forEach(el => el.classList.remove('active'));
+    const el = document.getElementById('participant-' + userId);
+    if (el) el.classList.add('active');
+}
+
+function toggleMute() {
+    isMuted = !isMuted;
+    
+    if (localStream) {
+        localStream.getAudioTracks().forEach(track => {
+            track.enabled = !isMuted;
+        });
+    }
+    
+    const btn = document.getElementById('toggle-mute-btn');
+    btn.innerHTML = isMuted ? '🔇' : '&#127908;';
+    btn.classList.toggle('call-control-active', isMuted);
+    
+    const localParticipant = callParticipants[currentUser?.id];
+    if (localParticipant) {
+        localParticipant.muted = isMuted;
+        updateParticipantList();
+    }
+}
+
+function toggleVideo() {
+    isVideoEnabled = !isVideoEnabled;
+    
+    if (localStream) {
+        localStream.getVideoTracks().forEach(track => {
+            track.enabled = isVideoEnabled;
+        });
+    }
+    
+    const btn = document.getElementById('toggle-video-btn');
+    btn.classList.toggle('call-control-active', !isVideoEnabled);
+}
+
+function toggleScreenShareView() {
+    isViewingScreenShare = !isViewingScreenShare;
+    
+    const screenView = document.getElementById('screen-share-view');
+    const btn = document.getElementById('toggle-screenshare-view-btn');
+    
+    screenView.style.display = isViewingScreenShare ? 'flex' : 'none';
+    btn.classList.toggle('call-control-active', isViewingScreenShare);
+}
+
+async function stopScreenShare() {
+    isScreenSharing = false;
+    
+    sendTcpMessage('screen_share_stop', {
         channel_id: currentChannel.id,
         user_id: currentUser.id
     });
-    document.getElementById('end-call-btn').style.display = 'inline-block';
-    document.getElementById('screen-share-btn').disabled = true;
+    
+    document.getElementById('toggle-screenshare-view-btn').style.display = 'none';
+    document.getElementById('screen-share-view').style.display = 'none';
+    document.getElementById('screen-share-btn').disabled = false;
 }
 
 function endCall() {
     if (!currentChannel || !currentUser) return;
+    
     sendTcpMessage('leave_call', {
         channel_id: currentChannel.id,
         user_id: currentUser.id
     });
+    
+    hideCallUI();
     document.getElementById('end-call-btn').style.display = 'none';
     document.getElementById('voice-call-btn').disabled = false;
     document.getElementById('video-call-btn').disabled = false;
     document.getElementById('screen-share-btn').disabled = false;
 }
+
+// ==================== WEBSOCKET HANDLERS ====================
+
+socket.on('call_started', (data) => {
+    if (currentChannel && data.channel_id === currentChannel.id) {
+        addParticipant(data.initiator_id, data.initiator_id, data.call_type === 'video');
+    }
+});
+
+socket.on('call_user_joined', (data) => {
+    if (currentChannel && data.channel_id === currentChannel.id) {
+        addParticipant(data.user_id, data.user_id, false);
+    }
+});
+
+socket.on('call_user_left', (data) => {
+    if (currentChannel && data.channel_id === currentChannel.id) {
+        removeParticipant(data.user_id);
+    }
+});
+
+socket.on('screen_share_started', (data) => {
+    if (currentChannel && data.channel_id === currentChannel.id) {
+        document.getElementById('screen-sharer-name').textContent = data.user_id;
+        document.getElementById('screen-share-view').style.display = 'flex';
+    }
+});
+
+socket.on('screen_share_stopped', (data) => {
+    if (currentChannel && data.channel_id === currentChannel.id) {
+        document.getElementById('screen-share-view').style.display = 'none';
+    }
+});
 
 // ==================== UTILIDADES ====================
 

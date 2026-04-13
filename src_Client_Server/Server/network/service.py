@@ -115,11 +115,17 @@ class TCPServer(NetworkService):
         self.port = port
         self.server_socket: Optional[socket.socket] = None
         self.clients: Dict[str, socket.socket] = {}
+        self.clients_lock = threading.RLock()
         self.running = False
         self.message_queue = queue.Queue()
         self.callbacks: Dict[str, List[Callable]] = {}
         self.lock = threading.RLock()
         self.server_thread: Optional[threading.Thread] = None
+        
+        self.user_client_map: Dict[str, str] = {}
+        self.client_user_map: Dict[str, str] = {}
+        
+        self.active_calls: Dict[str, Dict] = {}
     
     def start(self,host: str = '0.0.0.0', port: int = 5555):
         """Inicia el servidor"""
@@ -744,15 +750,14 @@ class TCPServer(NetworkService):
             
             print(f"[LOGIN] Attempting login with email: {email}")
             
-            # El orden de retorno es (success, error, user)
             success, error, user = auth_service.login(email, password)
             
             print(f"[LOGIN] Result - Success: {success}, Error: {error}, User type: {type(user)}")
             
+            user_dict = None
             if success and user:
                 try:
                     user_dict = user.dict() if hasattr(user, 'dict') else user.__dict__
-                    # Convertir enums a valores
                     if 'status' in user_dict:
                         user_dict['status'] = user_dict['status'].value if hasattr(user_dict['status'], 'value') else user_dict['status']
                     print(f"[LOGIN] User converted to dict successfully")
@@ -760,11 +765,14 @@ class TCPServer(NetworkService):
                     print(f"[LOGIN] Error converting user to dict: {e}")
                     import traceback
                     traceback.print_exc()
-                    user_dict = None
-            else:
-                user_dict = None
             
             if success and user_dict:
+                with self.clients_lock:
+                    user_id = user_dict.get('id') or user_dict.get('email')
+                    self.user_client_map[user_id] = client_id
+                    self.client_user_map[client_id] = user_id
+                    logger.info(f"[LOGIN] Mapped user {user_id} to client {client_id}")
+                
                 response = NetworkMessage(
                     type="login_response",
                     data={"success": True, "user": user_dict},
@@ -1707,21 +1715,38 @@ class TCPServer(NetworkService):
             user_id = message.data.get("user_id")
             call_type = message.data.get("call_type", "voice")
             
+            with self.clients_lock:
+                client_user = self.client_user_map.get(client_id, user_id)
+            
+            if channel_id not in self.active_calls:
+                self.active_calls[channel_id] = {
+                    'initiator': client_user,
+                    'type': call_type,
+                    'participants': []
+                }
+            
+            audio_input = message.data.get("audio_input", "default")
+            audio_output = message.data.get("audio_output", "default")
+            
             broadcast_msg = NetworkMessage(
                 type="call_started",
                 data={
                     "channel_id": channel_id,
-                    "initiator_id": user_id,
-                    "call_type": call_type
+                    "initiator_id": client_user,
+                    "call_type": call_type,
+                    "audio_input": audio_input,
+                    "audio_output": audio_output
                 },
                 sender_id="server"
             )
-            with self.lock:
-                for connected_client_id in list(self.clients.keys()):
-                    try:
-                        self.send(connected_client_id, broadcast_msg)
-                    except Exception:
-                        pass
+            
+            self._broadcast_to_channel(channel_id, broadcast_msg, exclude_client=client_id)
+            
+            self._broadcast_to_channel(channel_id, NetworkMessage(
+                type="call_user_joined",
+                data={"channel_id": channel_id, "user_id": client_user},
+                sender_id="server"
+            ), exclude_client=client_id)
             
             logger.info(f"Llamada {call_type} iniciada en canal {channel_id} por {user_id}")
         except Exception as e:
@@ -1733,18 +1758,20 @@ class TCPServer(NetworkService):
             channel_id = message.data.get("channel_id")
             user_id = message.data.get("user_id")
             
+            with self.clients_lock:
+                client_user = self.client_user_map.get(client_id, user_id)
+            
+            if channel_id in self.active_calls and client_user not in self.active_calls[channel_id].get('participants', []):
+                self.active_calls[channel_id].setdefault('participants', []).append(client_user)
+            
             broadcast_msg = NetworkMessage(
                 type="call_user_joined",
-                data={"channel_id": channel_id, "user_id": user_id},
+                data={"channel_id": channel_id, "user_id": client_user},
                 sender_id="server"
             )
-            with self.lock:
-                for connected_client_id in list(self.clients.keys()):
-                    if connected_client_id != client_id:
-                        try:
-                            self.send(connected_client_id, broadcast_msg)
-                        except Exception:
-                            pass
+            
+            self._broadcast_to_channel(channel_id, broadcast_msg, exclude_client=client_id)
+            logger.info(f"Usuario {client_user} se unió a la llamada en canal {channel_id}")
         except Exception as e:
             logger.error(f"Error en _handle_join_call: {e}")
 
@@ -1754,18 +1781,24 @@ class TCPServer(NetworkService):
             channel_id = message.data.get("channel_id")
             user_id = message.data.get("user_id")
             
+            with self.clients_lock:
+                client_user = self.client_user_map.get(client_id, user_id)
+            
+            if channel_id in self.active_calls and client_user in self.active_calls[channel_id].get('participants', []):
+                self.active_calls[channel_id]['participants'].remove(client_user)
+            
             broadcast_msg = NetworkMessage(
                 type="call_user_left",
-                data={"channel_id": channel_id, "user_id": user_id},
+                data={"channel_id": channel_id, "user_id": client_user},
                 sender_id="server"
             )
-            with self.lock:
-                for connected_client_id in list(self.clients.keys()):
-                    if connected_client_id != client_id:
-                        try:
-                            self.send(connected_client_id, broadcast_msg)
-                        except Exception:
-                            pass
+            
+            self._broadcast_to_channel(channel_id, broadcast_msg, exclude_client=client_id)
+            
+            if not self.active_calls[channel_id].get('participants'):
+                del self.active_calls[channel_id]
+            
+            logger.info(f"Usuario {client_user} abandonó la llamada en canal {channel_id}")
         except Exception as e:
             logger.error(f"Error en _handle_leave_call: {e}")
 
@@ -1775,20 +1808,68 @@ class TCPServer(NetworkService):
             channel_id = message.data.get("channel_id")
             user_id = message.data.get("user_id")
             
+            with self.clients_lock:
+                client_user = self.client_user_map.get(client_id, user_id)
+            
+            source_type = message.data.get("source_type", "screen")
+            source_id = message.data.get("source_id", "")
+            display_id = message.data.get("display_id", 0)
+            resolution = message.data.get("resolution", "1920x1080")
+            fps = message.data.get("fps", 30)
+            quality = message.data.get("quality", 80)
+            
+            if channel_id in self.active_calls:
+                self.active_calls[channel_id]['screen_sharing'] = client_user
+            
             broadcast_msg = NetworkMessage(
                 type="screen_share_started",
-                data={"channel_id": channel_id, "user_id": user_id},
+                data={
+                    "channel_id": channel_id,
+                    "user_id": client_user,
+                    "source_type": source_type,
+                    "source_id": source_id,
+                    "display_id": display_id,
+                    "resolution": resolution,
+                    "fps": fps,
+                    "quality": quality
+                },
                 sender_id="server"
             )
-            with self.lock:
-                for connected_client_id in list(self.clients.keys()):
-                    if connected_client_id != client_id:
-                        try:
-                            self.send(connected_client_id, broadcast_msg)
-                        except Exception:
-                            pass
+            
+            self._broadcast_to_channel(channel_id, broadcast_msg, exclude_client=client_id)
+            logger.info(f"Screen share iniciada por {client_user} en canal {channel_id}")
         except Exception as e:
             logger.error(f"Error en _handle_screen_share_start: {e}")
+
+    def _broadcast_to_channel(self, channel_id: str, message: NetworkMessage, exclude_client: str = None):
+        """Broadcast a todos los clientes en un canal de voz específico"""
+        try:
+            from src_Client_Server.Server.repositories import RepositoryFactory
+            from src_Client_Server.Server.services.message_service import MessageService
+            
+            repo_factory = RepositoryFactory()
+            message_service = MessageService(repo_factory)
+            
+            channel = repo_factory.get_repository('channels').get_by_id(channel_id)
+            if not channel:
+                logger.warning(f"Canal {channel_id} no encontrado para broadcast")
+                return
+            
+            server_id = channel.server_id
+            members = repo_factory.get_repository('server_members').get_by_server(server_id)
+            
+            with self.clients_lock:
+                for member in members:
+                    user_id = member.user_id
+                    if user_id in self.user_client_map:
+                        target_client = self.user_client_map[user_id]
+                        if target_client != exclude_client:
+                            try:
+                                self.send(target_client, message)
+                            except Exception as e:
+                                logger.warning(f"Error sending to {target_client}: {e}")
+        except Exception as e:
+            logger.error(f"Error en _broadcast_to_channel: {e}")
 
     def _handle_screen_share_stop(self, client_id: str, message: NetworkMessage, repo_factory):
         """Detiene compartir pantalla"""

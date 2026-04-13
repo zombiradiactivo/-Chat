@@ -23,6 +23,7 @@ from src_Client_Server.Client.ui.create_channel_modal import CreateChannelModal
 from src_Client_Server.Client.ui.server_settings_modal import ServerSettingsModal
 from src_Client_Server.Client.ui.manage_roles_modal import ManageRolesModal
 from src_Client_Server.Client.ui.invite_modal import InviteModal, AcceptInviteDialog
+from src_Client_Server.Client.ui.call_window import CallWindow
 from src_Client_Server.Client.utils.logger import setup_logger
 from src_Client_Server.Client.network.service import TCPClient, NetworkMessage
 
@@ -1445,15 +1446,15 @@ class MainWindow(ctk.CTk):
             data={
                 "channel_id": self.current_channel.id,
                 "user_id": self.current_user.id,
-                "call_type": "voice"
+                "call_type": "voice",
+                "audio_input": "default",
+                "audio_output": "default"
             },
             sender_id=self.current_user.id
         )
         self.network_service.send(start_msg)
         
-        self.voice_call_btn.configure(state="disabled")
-        self.video_call_btn.configure(state="disabled")
-        self.end_call_btn.configure(state="normal")
+        self._open_call_window("voice")
     
     def _on_start_video_call(self):
         """Inicia una llamada de video"""
@@ -1468,13 +1469,15 @@ class MainWindow(ctk.CTk):
             data={
                 "channel_id": self.current_channel.id,
                 "user_id": self.current_user.id,
-                "call_type": "video"
+                "call_type": "video",
+                "video_input": "default",
+                "audio_input": "default",
+                "audio_output": "default"
             },
             sender_id=self.current_user.id
         )
         self.network_service.send(start_msg)
         
-        # Unirse a la llamada
         join_msg = NetworkMessage(
             type="join_call",
             data={
@@ -1485,10 +1488,38 @@ class MainWindow(ctk.CTk):
         )
         self.network_service.send(join_msg)
         
+        self._open_call_window("video")
+    
+    def _open_call_window(self, call_type):
+        """Abre la ventana de llamada en ventana separada"""
+        if not self.current_channel:
+            return
+        
+        self.call_window = CallWindow(
+            self,
+            channel_name="#" + self.current_channel.name,
+            call_type=call_type,
+            on_end_call=self._on_end_call_window
+        )
+        
+        self.call_window.add_participant(
+            self.current_user.id,
+            self.current_user.username,
+            has_video=(call_type == "video")
+        )
+        
         self.voice_call_btn.configure(state="disabled")
         self.video_call_btn.configure(state="disabled")
-        self.screen_share_btn.configure(state="normal")
+        self.screen_share_btn.configure(state="normal" if call_type == "video" else "disabled")
         self.end_call_btn.configure(state="normal")
+    
+    def _on_end_call_window(self):
+        """Finaliza la llamada desde la ventana de llamada"""
+        if self.call_window:
+            self.call_window.destroy()
+            self.call_window = None
+        
+        self._on_end_call()
     
     def _on_screen_share(self):
         """Inicia compartir pantalla"""
@@ -1501,7 +1532,12 @@ class MainWindow(ctk.CTk):
             type="screen_share_start",
             data={
                 "channel_id": self.current_channel.id,
-                "user_id": self.current_user.id
+                "user_id": self.current_user.id,
+                "source_type": "screen",
+                "display_id": 0,
+                "resolution": "1920x1080",
+                "fps": 30,
+                "quality": 80
             },
             sender_id=self.current_user.id
         )
@@ -1563,21 +1599,39 @@ class MainWindow(ctk.CTk):
         
         if self.current_channel and self.current_channel.id == channel_id:
             if not self.in_call:
-                self.voice_call_btn.configure(state="disabled")
-                self.video_call_btn.configure(state="disabled")
-                self.end_call_btn.configure(state="normal")
+                self.in_call = True
+                self.call_type = call_type
+            
+            if hasattr(self, 'call_window') and self.call_window:
+                self.after(0, lambda: self.call_window.add_participant(
+                    initiator_id, initiator_id, has_video=(call_type == "video")
+                ))
+            
+            self.voice_call_btn.configure(state="disabled")
+            self.video_call_btn.configure(state="disabled")
+            self.end_call_btn.configure(state="normal")
     
     def _handle_call_user_joined(self, data):
         """Maneja cuando un usuario se une a la llamada"""
         user_id = data.get("user_id")
         channel_id = data.get("channel_id")
-        logger.info(f"Usuario {user_id} se unió a la llamada en canal {channel_id}")
+        
+        if self.current_channel and self.current_channel.id == channel_id:
+            logger.info(f"Usuario {user_id} se unió a la llamada en canal {channel_id}")
+            
+            if hasattr(self, 'call_window') and self.call_window:
+                self.after(0, lambda: self.call_window.add_participant(user_id, user_id))
     
     def _handle_call_user_left(self, data):
         """Maneja cuando un usuario abandona la llamada"""
         user_id = data.get("user_id")
         channel_id = data.get("channel_id")
-        logger.info(f"Usuario {user_id} abandonó la llamada en canal {channel_id}")
+        
+        if self.current_channel and self.current_channel.id == channel_id:
+            logger.info(f"Usuario {user_id} abandonó la llamada en canal {channel_id}")
+            
+            if hasattr(self, 'call_window') and self.call_window:
+                self.after(0, lambda: self.call_window.remove_participant(user_id))
     
     def _handle_video_frame(self, data):
         """Maneja frames de video recibidos"""

@@ -93,9 +93,9 @@
             <div class="chat-header">
                 <span id="channel-name"># Selecciona un canal</span>
                 <div class="call-controls">
-                    <button class="icon-btn" id="voice-call-btn" onclick="startVoiceCall()" disabled title="Llamada de voz">&#128222;</button>
-                    <button class="icon-btn" id="video-call-btn" onclick="startVideoCall()" disabled title="Videollamada">&#127909;</button>
-                    <button class="icon-btn" id="screen-share-btn" onclick="startScreenShare()" disabled title="Compartir pantalla">&#128421;</button>
+                    <button class="icon-btn" id="voice-call-btn" onclick="showVoiceCallModal()" disabled title="Llamada de voz">&#128222;</button>
+                    <button class="icon-btn" id="video-call-btn" onclick="showVideoCallModal()" disabled title="Videollamada">&#127909;</button>
+                    <button class="icon-btn" id="screen-share-btn" onclick="showScreenShareModal()" disabled title="Compartir pantalla">&#128421;</button>
                     <button class="icon-btn" id="search-btn" onclick="showSearchModal()" title="Buscar">&#128269;</button>
                     <button class="icon-btn call-active" id="end-call-btn" onclick="endCall()" style="display:none" title="Finalizar">&#128308;</button>
                 </div>
@@ -147,6 +147,7 @@
                 <select id="new-channel-type">
                     <option value="text">Texto</option>
                     <option value="voice">Voz</option>
+                    <option value="video">Video</option>
                 </select>
             </div>
             <div class="modal-actions">
@@ -250,6 +251,155 @@
             <div class="search-results" id="search-results"></div>
             <div class="modal-actions">
                 <button class="btn btn-secondary" onclick="closeModal('search-modal')">Cerrar</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Voice Call Modal -->
+    <div id="voice-call-modal" class="modal">
+        <div class="modal-content">
+            <h2>Llamada de Voz</h2>
+            <div class="form-group">
+                <label>Micrófono</label>
+                <select id="audio-input-device">
+                    <option value="default">Predeterminado</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label>Altavoz</label>
+                <select id="audio-output-device">
+                    <option value="default">Predeterminado</option>
+                </select>
+            </div>
+            <div class="modal-actions">
+                <button class="btn btn-secondary" onclick="closeModal('voice-call-modal')">Cancelar</button>
+                <button class="btn btn-primary" onclick="startVoiceCall()">Iniciar Llamada</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Video Call Modal -->
+    <div id="video-call-modal" class="modal">
+        <div class="modal-content">
+            <h2>Videollamada</h2>
+            <div class="form-group">
+                <label>Cámara</label>
+                <select id="video-input-device">
+                    <option value="default">Predeterminada</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label>Micrófono</label>
+                <select id="video-audio-input">
+                    <option value="default">Predeterminado</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label>Altavoz</label>
+                <select id="video-audio-output">
+                    <option value="default">Predeterminado</option>
+                </select>
+            </div>
+            <div class="modal-actions">
+                <button class="btn btn-secondary" onclick="closeModal('video-call-modal')">Cancelar</button>
+                <button class="btn btn-primary" onclick="startVideoCall()">Iniciar Videollamada</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Call UI -->
+    <div id="call-ui" class="call-ui" style="display:none">
+        <div class="call-header">
+            <div class="call-info">
+                <span class="call-icon">&#128222;</span>
+                <span id="call-channel-name"># canal</span>
+                <span class="call-status" id="call-status">Conectado</span>
+            </div>
+            <button class="call-end-btn" onclick="endCall()" title="Finalizar llamada">&#128222;</button>
+        </div>
+        <div class="call-content">
+            <div class="call-main-view" id="call-main-view">
+                <div class="screen-share-view" id="screen-share-view" style="display:none">
+                    <div class="screen-share-header">
+                        <span class="screen-share-status">&#128187; Compartiendo pantalla</span>
+                        <span class="screen-sharer" id="screen-sharer-name"></span>
+                    </div>
+                    <div class="screen-share-content" id="screen-share-content">
+                        <div class="screen-share-placeholder">Pantalla compartida</div>
+                    </div>
+                </div>
+                <div class="video-grid" id="video-grid">
+                    <div class="video-participant" id="video-participant-template" style="display:none">
+                        <video class="participant-video" autoplay playsinline></video>
+                        <div class="participant-info">
+                            <span class="participant-name"></span>
+                            <span class="participant-muted">&#128263;</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="call-participants" id="call-participants">
+                <div class="participants-header">
+                    <span>&#128101; Participantes (<span id="participant-count">0</span>)</span>
+                </div>
+                <div class="participants-list" id="participants-list">
+                    <div class="participant-item" id="participant-template" style="display:none">
+                        <div class="participant-avatar"></div>
+                        <div class="participant-details">
+                            <div class="participant-item-name"></div>
+                            <div class="participant-state"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="call-controls">
+            <button class="call-control-btn" id="toggle-mute-btn" onclick="toggleMute()" title="Silenciar">&#127908;</button>
+            <button class="call-control-btn" id="toggle-video-btn" onclick="toggleVideo()" title="Video" style="display:none">&#127909;</button>
+            <button class="call-control-btn" id="toggle-screen-share-btn" onclick="showScreenShareModal()" title="Compartir pantalla">&#128421;</button>
+            <button class="call-control-btn call-control-active" id="toggle-screenshare-view-btn" onclick="toggleScreenShareView()" title="Ver pantalla" style="display:none">&#128187;</button>
+            <button class="call-control-btn call-end" onclick="endCall()" title="Finalizar">&#128222;</button>
+        </div>
+    </div>
+
+    <!-- Screen Share Modal -->
+    <div id="screen-share-modal" class="modal">
+        <div class="modal-content">
+            <h2>Compartir Pantalla</h2>
+            <div class="form-group">
+                <label>Fuente</label>
+                <select id="share-source-type" onchange="updateShareOptions()">
+                    <option value="screen">Pantalla Completa</option>
+                    <option value="display">Monitor Específico</option>
+                </select>
+            </div>
+            <div class="form-group" id="display-select-group" style="display:none">
+                <label>Monitor</label>
+                <select id="share-display">
+                    <option value="0"> Monitor 1</option>
+                    <option value="1">Monitor 2</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label>Resolución</label>
+                <select id="share-resolution">
+                    <option value="1920x1080">1920x1080 (1080p)</option>
+                    <option value="1280x720">1280x720 (720p)</option>
+                    <option value="2560x1440">2560x1440 (1440p)</option>
+                    <option value="3840x2160">3840x2160 (4K)</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label>FPS</label>
+                <select id="share-fps">
+                    <option value="60">60 FPS</option>
+                    <option value="30" selected>30 FPS</option>
+                    <option value="15">15 FPS</option>
+                </select>
+            </div>
+            <div class="modal-actions">
+                <button class="btn btn-secondary" onclick="closeModal('screen-share-modal')">Cancelar</button>
+                <button class="btn btn-primary" onclick="startScreenShare()">Compartir</button>
             </div>
         </div>
     </div>

@@ -445,6 +445,14 @@ class ServerService:
         )
         self.channels_repo.create(voice_channel.dict())
     
+        # Canal de vvideo general
+        voice_channel = ChannelCreate(
+            server_id=server_id,
+            name="Voz General",
+            type=ChannelType.VIDEO,
+        )
+        self.channels_repo.create(voice_channel.dict())
+
     def _add_member(self, user_id: str, server_id: str, role_ids: List[str]):
         """Añade un miembro al servidor"""
         member_data = {
