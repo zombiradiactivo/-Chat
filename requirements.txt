@@ -12,3 +12,4 @@ pydantic
 pydantic[email]
 flask
 flask-socketio
+customtkinter

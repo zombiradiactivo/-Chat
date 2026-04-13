@@ -11,6 +11,9 @@ let messages = [];
 let isTcpConnected = false;
 let messagesHasMore = false;
 let loadingMoreMessages = false;
+let typingUsers = {};
+let lastTypingTime = 0;
+let typingTimeout = 3000;
 
 // Promesas para respuestas del servidor
 let pendingResponse = null;
@@ -111,6 +114,12 @@ function handleServerMessage(message) {
         case 'call_user_joined':
         case 'call_user_left':
             console.log('Evento de llamada:', message.type, message.data);
+            break;
+        case 'user_typing':
+            handleUserTyping(message.data);
+            break;
+        case 'search_response':
+            handleSearchResponse(message.data);
             break;
         default:
             console.log('Tipo de mensaje no manejado:', message.type);
@@ -599,6 +608,66 @@ function handleBroadcast(data) {
 function handleMessageKeypress(event) {
     if (event.key === 'Enter') {
         sendMessage();
+    } else {
+        sendTypingIndicator();
+    }
+}
+
+function sendTypingIndicator() {
+    if (!currentChannel || !currentUser) return;
+    
+    const now = Date.now();
+    if (now - lastTypingTime >= typingTimeout) {
+        lastTypingTime = now;
+        
+        socket.emit('tcp_send', {
+            type: 'typing',
+            data: {
+                channel_id: currentChannel.id,
+                user_id: currentUser.id
+            },
+            sender_id: currentUser.id,
+            timestamp: now / 1000
+        });
+    }
+}
+
+function handleUserTyping(data) {
+    if (!currentChannel || currentChannel.id !== data.channel_id) return;
+    if (!currentUser || data.user_id === currentUser.id) return;
+    
+    typingUsers[data.user_id] = Date.now();
+    updateTypingLabel();
+    
+    setTimeout(() => {
+        delete typingUsers[data.user_id];
+        updateTypingLabel();
+    }, 4000);
+}
+
+function updateTypingLabel() {
+    const typingLabel = document.getElementById('typing-label');
+    if (!typingLabel) return;
+    
+    const now = Date.now();
+    const activeTyping = Object.keys(typingUsers).filter(uid => now - typingUsers[uid] < 4000);
+    
+    if (activeTyping.length > 0) {
+        if (activeTyping.length === 1) {
+            typingLabel.textContent = activeTyping[0].substring(0, 8) + ' está escribiendo...';
+        } else {
+            typingLabel.textContent = activeTyping.length + ' usuarios están escribiendo...';
+        }
+        typingLabel.style.display = 'block';
+    } else {
+        typingLabel.style.display = 'none';
+    }
+}
+
+function handleSearchResponse(data) {
+    resolveResponse(data);
+    if (data && data.success) {
+        console.log('Búsqueda completada:', data.results.length, 'resultados');
     }
 }
 
@@ -950,6 +1019,75 @@ function copyInviteCode(code) {
 
 function showJoinServer() {
     openModal('join-server-modal');
+}
+
+function showSearchModal() {
+    if (!currentServer) return;
+    openModal('search-modal');
+}
+
+function performSearch() {
+    if (!currentServer) return;
+    
+    const query = document.getElementById('search-query').value.trim();
+    const searchType = document.getElementById('search-type').value;
+    
+    if (!query) {
+        alert('Ingresa un termino de busqueda');
+        return;
+    }
+    
+    socket.emit('tcp_send', {
+        type: 'search',
+        data: {
+            query: query,
+            server_id: currentServer.id,
+            search_type: searchType
+        },
+        sender_id: currentUser.id,
+        timestamp: Date.now() / 1000
+    });
+    
+    setTimeout(() => {
+        const results = window.lastSearchResults || [];
+        window.lastSearchResults = null;
+        
+        renderSearchResults(results, searchType);
+    }, 1000);
+}
+
+function renderSearchResults(results, searchType) {
+    const container = document.getElementById('search-results');
+    container.innerHTML = '';
+    
+    if (!results || results.length === 0) {
+        container.innerHTML = '<div class="no-results">No se encontraron resultados</div>';
+        return;
+    }
+    
+    results.forEach(result => {
+        const div = document.createElement('div');
+        div.className = 'search-result-item';
+        
+        if (searchType === 'messages') {
+            div.innerHTML = `
+                <span class="result-channel">#${escapeHtml(result.channel_name || '')}</span>
+                <span class="result-content">${escapeHtml(result.content || '')}</span>
+            `;
+        } else if (searchType === 'members') {
+            div.innerHTML = `<span class="result-user">@${escapeHtml(result.username || '')}</span>`;
+        } else {
+            div.innerHTML = `<span class="result-channel"># ${escapeHtml(result.channel_name || '')}</span>`;
+        }
+        
+        container.appendChild(div);
+    });
+}
+
+function handleSearchResponse(data) {
+    if (data && data.success) {
+        window.lastSearchResults = data.results || [];
+    }
 }
 
 function acceptInvite() {

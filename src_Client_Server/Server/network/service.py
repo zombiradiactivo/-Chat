@@ -320,8 +320,12 @@ class TCPServer(NetworkService):
                 self._handle_screen_share_stop(client_id, message, repo_factory)
             elif message.type == "screen_frame":
                 self._handle_screen_frame(client_id, message, repo_factory)
+            elif message.type == "typing":
+                self._handle_typing(client_id, message, repo_factory)
             elif message.type == "audio_frame":
                 self._handle_audio_frame(client_id, message, repo_factory)
+            elif message.type == "search":
+                self._handle_search(client_id, message, repo_factory)
             else:
                 print(f"Error handling message type {message.type}")
 
@@ -1578,6 +1582,123 @@ class TCPServer(NetworkService):
                             pass
         except Exception as e:
             logger.error(f"Error en _handle_audio_frame: {e}")
+
+    def _handle_typing(self, client_id: str, message: NetworkMessage, repo_factory):
+        """Maneja eventos de typing y notifica a otros usuarios"""
+        try:
+            channel_id = message.data.get("channel_id")
+            user_id = message.data.get("user_id")
+            
+            if not channel_id or not user_id:
+                return
+            
+            broadcast_msg = NetworkMessage(
+                type="user_typing",
+                data={
+                    "channel_id": channel_id,
+                    "user_id": user_id
+                },
+                sender_id="server"
+            )
+            
+            with self.lock:
+                for connected_client_id in list(self.clients.keys()):
+                    if connected_client_id != client_id:
+                        try:
+                            self.send(connected_client_id, broadcast_msg)
+                        except Exception:
+                            pass
+            
+            logger.info(f"Typing event for channel {channel_id} from user {user_id}")
+        except Exception as e:
+            logger.error(f"Error en _handle_typing: {e}")
+
+    def _handle_search(self, client_id: str, message: NetworkMessage, repo_factory):
+        """Maneja búsquedas en el servidor"""
+        try:
+            from src_Client_Server.Server.services.server_service import ServerService
+            
+            query = message.data.get("query", "")
+            server_id = message.data.get("server_id")
+            search_type = message.data.get("search_type", "messages")
+            
+            if not query or not server_id:
+                response = NetworkMessage(
+                    type="search_response",
+                    data={"success": False, "error": "Parámetros incompletos"},
+                    sender_id="server"
+                )
+                self.send(client_id, response)
+                return
+            
+            results = []
+            
+            if search_type == "messages":
+                from src_Client_Server.Server.services.message_service import MessageService
+                message_service = MessageService(repo_factory)
+                
+                channels_repo = repo_factory.get_repository('channels')
+                channels = channels_repo.get_by_server(server_id)
+                
+                for channel in channels:
+                    messages = message_service.get_channel_messages(channel.id, limit=20)
+                    for msg in messages:
+                        if query.lower() in msg.content.lower():
+                            results.append({
+                                "message_id": msg.id,
+                                "channel_id": channel.id,
+                                "channel_name": channel.name,
+                                "content": msg.content[:100],
+                                "author_id": msg.author_id,
+                                "created_at": msg.created_at
+                            })
+            
+            elif search_type == "members":
+                from src_Client_Server.Server.services.server_service import ServerService
+                server_service = ServerService(repo_factory)
+                
+                members = server_service.get_server_members(server_id)
+                for member in members:
+                    user = member.get("user", {})
+                    username = user.get("username", "")
+                    if query.lower() in username.lower():
+                        results.append({
+                            "user_id": user.get("id"),
+                            "username": username
+                        })
+            
+            elif search_type == "channels":
+                channels_repo = repo_factory.get_repository("channels")
+                channels = channels_repo.get_by_server(server_id)
+                
+                for channel in channels:
+                    if query.lower() in channel.name.lower():
+                        results.append({
+                            "channel_id": channel.id,
+                            "channel_name": channel.name,
+                            "channel_type": channel.type.value if hasattr(channel.type, 'value') else channel.type
+                        })
+            
+            response = NetworkMessage(
+                type="search_response",
+                data={
+                    "success": True,
+                    "results": results[:50],
+                    "query": query,
+                    "search_type": search_type
+                },
+                sender_id="server"
+            )
+            self.send(client_id, response)
+            logger.info(f"Búsqueda '{query}' en {server_id}: {len(results)} resultados")
+        except Exception as e:
+            response = NetworkMessage(
+                type="search_response",
+                data={"success": False, "error": str(e)},
+                sender_id="server"
+            )
+            self.send(client_id, response)
+            logger.error(f"Error en _handle_search: {e}")
 
     def _handle_start_call(self, client_id: str, message: NetworkMessage, repo_factory):
         """Inicia una llamada de voz/video en un canal"""

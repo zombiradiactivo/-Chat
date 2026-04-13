@@ -269,6 +269,18 @@ class MainWindow(ctk.CTk):
         )
         self.screen_share_btn.pack(side="left", padx=2)
         
+        self.search_btn = ctk.CTkButton(
+            self.call_controls_frame,
+            text="🔍",
+            width=35,
+            height=35,
+            fg_color="transparent",
+            hover_color=("gray75", "gray35"),
+            command=self._on_search,
+            state="disabled"
+        )
+        self.search_btn.pack(side="left", padx=2)
+        
         self.end_call_btn = ctk.CTkButton(
             self.call_controls_frame,
             text="🔴",
@@ -303,6 +315,14 @@ class MainWindow(ctk.CTk):
         )
         self.attach_btn.grid(row=0, column=0, padx=(10, 0), pady=10)
         
+        self.typing_label = ctk.CTkLabel(
+            self.message_input_frame,
+            text="",
+            font=ctk.CTkFont(size=10),
+            text_color="gray60"
+        )
+        self.typing_label.grid(row=1, column=0, columnspan=3, padx=10, pady=(0, 5), sticky="w")
+        
         self.message_entry = ctk.CTkEntry(
             self.message_input_frame,
             placeholder_text="Escribe un mensaje...",
@@ -310,6 +330,11 @@ class MainWindow(ctk.CTk):
         )
         self.message_entry.grid(row=0, column=1, padx=(10, 10), pady=10, sticky="ew")
         self.message_entry.bind("<Return>", lambda e: self._send_message())
+        self.message_entry.bind("<KeyRelease>", self._on_typing)
+        
+        self.last_typing_time = 0
+        self.typing_timeout = 3.0
+        self.typing_users = {}
         
         self.send_button = ctk.CTkButton(
             self.message_input_frame,
@@ -414,6 +439,10 @@ class MainWindow(ctk.CTk):
             self.after(0, lambda: self._handle_screen_share_started(message.data))
         elif message.type == "screen_share_stopped":
             self.after(0, lambda: self._handle_screen_share_stopped(message.data))
+        elif message.type == "user_typing":
+            self._handle_user_typing(message.data)
+        elif message.type == "search_response":
+            self._handle_search_response(message.data)
     
     def _handle_message_broadcast(self, data):
         """Maneja mensajes de broadcast (mensajes recibidos de otros usuarios)"""
@@ -735,6 +764,14 @@ class MainWindow(ctk.CTk):
             self.voice_call_btn.configure(state="disabled")
             self.video_call_btn.configure(state="disabled")
             self.screen_share_btn.configure(state="disabled")
+        
+        if channel_type == 'text':
+            self.search_btn.configure(state="normal")
+        else:
+            self.search_btn.configure(state="disabled")
+        
+        self.typing_users = {}
+        self.typing_label.configure(text="")
         
         self._load_channel_messages()
     
@@ -1639,3 +1676,165 @@ class MainWindow(ctk.CTk):
         
         btn = ctk.CTkButton(error_win, text="OK", command=error_win.destroy)
         btn.pack(pady=(0, 10))
+    
+    def _on_typing(self, event=None):
+        """Maneja el evento de typing del usuario"""
+        if not self.current_channel or not self.current_user:
+            return
+        
+        current_time = time.time()
+        if current_time - self.last_typing_time >= self.typing_timeout:
+            self.last_typing_time = current_time
+            
+            typing_msg = NetworkMessage(
+                type="typing",
+                data={
+                    "channel_id": self.current_channel.id,
+                    "user_id": self.current_user.id
+                },
+                sender_id=self.current_user.id
+            )
+            self.network_service.send(typing_msg)
+    
+    def _handle_user_typing(self, data):
+        """Maneja cuando otro usuario está escribiendo"""
+        channel_id = data.get("channel_id")
+        user_id = data.get("user_id")
+        
+        if not self.current_channel or self.current_channel.id != channel_id:
+            return
+        
+        if user_id == self.current_user.id:
+            return
+        
+        self.typing_users[user_id] = time.time()
+        self._update_typing_label()
+        
+        self.after(3000, lambda: self._clear_typing_user(user_id))
+    
+    def _update_typing_label(self):
+        """Actualiza la etiqueta de typing"""
+        current_time = time.time()
+        
+        active_typing = []
+        for uid, last_time in list(self.typing_users.items()):
+            if current_time - last_time < 4:
+                active_typing.append(uid[:8])
+        
+        if active_typing:
+            if len(active_typing) == 1:
+                self.typing_label.configure(text=f"{active_typing[0]} está escribiendo...")
+            else:
+                self.typing_label.configure(text=f"{len(active_typing)} usuarios están escribiendo...")
+        else:
+            self.typing_label.configure(text="")
+    
+    def _clear_typing_user(self, user_id):
+        """Limpia el usuario de la lista de typing"""
+        if user_id in self.typing_users:
+            del self.typing_users[user_id]
+            self._update_typing_label()
+    
+    def _handle_search_response(self, data):
+        """Maneja la respuesta de búsqueda"""
+        if data.get("success"):
+            results = data.get("results", [])
+            logger.info(f"Búsqueda completada: {len(results)} resultados")
+        
+        self.response_data = data
+        self.response_event.set()
+    
+    def _on_search(self):
+        """Abre el diálogo de búsqueda"""
+        if not self.current_server:
+            return
+        
+        search_win = ctk.CTkToplevel(self)
+        search_win.title("Buscar")
+        search_win.geometry("400x500")
+        search_win.transient(self)
+        
+        search_win.grid_columnconfigure(0, weight=1)
+        search_win.grid_rowconfigure(1, weight=1)
+        
+        search_frame = ctk.CTkFrame(search_win)
+        search_frame.grid(row=0, column=0, sticky="ew", padx=10, pady=10)
+        search_frame.grid_columnconfigure(1, weight=1)
+        
+        ctk.CTkLabel(search_frame, text="Buscar:").grid(row=0, column=0, padx=5, pady=5)
+        
+        search_entry = ctk.CTkEntry(search_frame)
+        search_entry.grid(row=0, column=1, padx=5, pady=5, sticky="ew")
+        
+        search_type_var = ctk.StringVar(value="messages")
+        
+        type_frame = ctk.CTkFrame(search_win)
+        type_frame.grid(row=0, column=1, padx=10, pady=10, sticky="ew")
+        
+        for i, (label, value) in enumerate([("Mensajes", "messages"), ("Miembros", "members"), ("Canales", "channels")]):
+            ctk.CTkRadioButton(
+                type_frame,
+                text=label,
+                variable=search_type_var,
+                value=value
+            ).pack(side="left", padx=10)
+        
+        results_frame = ctk.CTkScrollableFrame(search_win)
+        results_frame.grid(row=1, column=0, columnspan=2, sticky="nsew", padx=10, pady=10)
+        
+        def do_search():
+            query = search_entry.get().strip()
+            if not query:
+                return
+            
+            search_msg = NetworkMessage(
+                type="search",
+                data={
+                    "query": query,
+                    "server_id": self.current_server.id,
+                    "search_type": search_type_var.get()
+                },
+                sender_id=self.current_user.id if self.current_user else "unknown"
+            )
+            
+            if self.network_service.send(search_msg):
+                if self.response_event.wait(timeout=10.0):
+                    results = self.response_data.get("results", []) if self.response_data else []
+                    self.response_event.clear()
+                    
+                    for widget in results_frame.winfo_children():
+                        widget.destroy()
+                    
+                    if not results:
+                        ctk.CTkLabel(results_frame, text="No se encontraron resultados").pack(pady=10)
+                        return
+                    
+                    for result in results:
+                        if search_type_var.get() == "messages":
+                            text = f"#{result.get('channel_name', '')}: {result.get('content', '')[:50]}..."
+                        elif search_type_var.get() == "members":
+                            text = f"@{result.get('username', '')}"
+                        else:
+                            text = f"# {result.get('channel_name', '')}"
+                        
+                        ctk.CTkButton(
+                            results_frame,
+                            text=text,
+                            fg_color="transparent",
+                            anchor="w",
+                            command=lambda r=result: _on_result_click(r)
+                        ).pack(fill="x", pady=2)
+        
+        def _on_result_click(result):
+            if result.get("channel_id"):
+                for channel in self.channels:
+                    if channel.get("id") == result.get("channel_id"):
+                        self._select_channel(channel)
+                        break
+            search_win.destroy()
+        
+        ctk.CTkButton(
+            search_frame,
+            text="Buscar",
+            command=do_search
+        ).grid(row=0, column=2, padx=5, pady=5)

@@ -96,6 +96,7 @@
                     <button class="icon-btn" id="voice-call-btn" onclick="startVoiceCall()" disabled title="Llamada de voz">&#128222;</button>
                     <button class="icon-btn" id="video-call-btn" onclick="startVideoCall()" disabled title="Videollamada">&#127909;</button>
                     <button class="icon-btn" id="screen-share-btn" onclick="startScreenShare()" disabled title="Compartir pantalla">&#128421;</button>
+                    <button class="icon-btn" id="search-btn" onclick="showSearchModal()" title="Buscar">&#128269;</button>
                     <button class="icon-btn call-active" id="end-call-btn" onclick="endCall()" style="display:none" title="Finalizar">&#128308;</button>
                 </div>
             </div>
@@ -108,6 +109,7 @@
                 <input type="text" id="message-input" placeholder="Escribe un mensaje..." onkeypress="handleMessageKeypress(event)">
                 <button class="btn btn-primary btn-send" onclick="sendMessage()">Enviar</button>
             </div>
+            <div id="typing-label" class="typing-label" style="display:none"></div>
         </div>
 
         <!-- Members Sidebar -->
@@ -228,6 +230,26 @@
             <div class="modal-actions">
                 <button class="btn btn-secondary" onclick="closeModal('join-server-modal')">Cancelar</button>
                 <button class="btn btn-primary" onclick="acceptInvite()">Unirse</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Search Modal -->
+    <div id="search-modal" class="modal">
+        <div class="modal-content modal-lg">
+            <h2>Buscar</h2>
+            <div class="search-form">
+                <input type="text" id="search-query" placeholder="Que deseas buscar?">
+                <select id="search-type">
+                    <option value="messages">Mensajes</option>
+                    <option value="members">Miembros</option>
+                    <option value="channels">Canales</option>
+                </select>
+                <button class="btn btn-primary" onclick="performSearch()">Buscar</button>
+            </div>
+            <div class="search-results" id="search-results"></div>
+            <div class="modal-actions">
+                <button class="btn btn-secondary" onclick="closeModal('search-modal')">Cerrar</button>
             </div>
         </div>
     </div>
